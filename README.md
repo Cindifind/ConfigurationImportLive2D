@@ -316,3 +316,4 @@ dist/
 4. **浏览器兼容**：需要 WebGL 支持（Chrome/Firefox/Edge/Safari 均支持）。
 5. **模型目录规范**：模型文件夹名需与 `data-cubism-model` 值一致，且内含 `xxx.model3.json`。
 6. **配置主要js**：需要自主打包后生成的 `index-hash.js`文件。
+7. **测试js**：直接引入 `https://muqingxi.com/live2d/assets/index-BtpXaDW6.js` 文件快速开始。
