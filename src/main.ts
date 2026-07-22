@@ -12,7 +12,7 @@ import { CubismShaderManager_WebGL } from '@framework/rendering/cubismshader_web
 import { LAppLive2DManager } from './lapplive2dmanager';
 import { LAppSubdelegate } from './lappsubdelegate';
 import { LAppModel } from './lappmodel';
-import { getTalkManager, TalkStartCallback, TalkEndCallback } from './live2dtalkmanager';
+import { getTalkManager, TalkStartCallback, TalkEndCallback, TalkActionCallback, ModelBehaviorInfo } from './live2dtalkmanager';
 
 // 声明全局配置接口
 interface Window {
@@ -325,5 +325,56 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    */
   onTalkEnd(cb: TalkEndCallback): void {
     getTalkManager().onTalkEnd(cb);
+  },
+
+  /**
+   * 获取当前模型的行为信息（motion 组名、表情名等）
+   * 用于了解模型支持哪些行为，方便配置 setTalkAction
+   * @returns { motionGroups: string[], expressionNames: string[], hasLipSync: boolean }
+   *
+   * 用法：
+   *   Live2DModel.onReady(() => {
+   *     const info = Live2DModel.getModelInfo();
+   *     console.log(info.motionGroups);     // ['Idle', 'Talk', 'TapBody']
+   *     console.log(info.expressionNames);  // ['F01', 'F02', ...]
+   *   });
+   */
+  getModelInfo(): ModelBehaviorInfo | null {
+    return getTalkManager().getModelInfo();
+  },
+
+  /**
+   * 设置自定义说话行为（完全控制模型说话时做什么）
+   * @param action 自定义回调 (model, text, durationSec) => void，传 null 恢复自动检测
+   *
+   * 自动检测模式优先级：
+   *   1. 有表达式 → 随机切换表情
+   *   2. 有 motion 组 → 播放随机 motion（跳过 Idle 类）
+   *   3. 都没有 → 仅显示气泡
+   *
+   * 用法（使用自定义模型 'Talk' motion 组）：
+   *   Live2DModel.setTalkAction((model, text, duration) => {
+   *     model.startRandomMotion('Talk', 3);
+   *   });
+   *
+   * 用法（使用多个行为组合）：
+   *   Live2DModel.setTalkAction((model, text, duration) => {
+   *     model.setRandomExpression();
+   *     model.startRandomMotion('Speak', 3);
+   *   });
+   */
+  setTalkAction(action: TalkActionCallback | null): void {
+    getTalkManager().setTalkAction(action);
+  },
+
+  /**
+   * 指定自动说话时使用的 motion 组名（简单配置方式）
+   * @param groupName motion 组名，如 'Talk', 'Speak'，传空字符串恢复自动检测
+   *
+   * 用法：
+   *   Live2DModel.setTalkMotionGroup('Talk');
+   */
+  setTalkMotionGroup(groupName: string): void {
+    getTalkManager().setTalkMotionGroup(groupName);
   }
 };
