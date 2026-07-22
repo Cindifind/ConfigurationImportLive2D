@@ -108,6 +108,7 @@ export class LAppSubdelegate {
     this.resizeCanvas();
     this._view.initialize(this);
     this._view.initializeSprite();
+    this._view['saveBaseMatrix'](); // 更新缩放基准矩阵
   }
 
   private resizeObserverCallback(
@@ -135,8 +136,8 @@ export class LAppSubdelegate {
 
     const gl = this._glManager.getGl();
 
-    // 画面の初期化
-    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    // 画面の初期化（透明背景）
+    gl.clearColor(0.0, 0.0, 0.0, 0.0);
 
     // 深度テストを有効化
     gl.enable(gl.DEPTH_TEST);
@@ -241,6 +242,13 @@ export class LAppSubdelegate {
 
   public getLive2DManager(): LAppLive2DManager {
     return this._live2dManager;
+  }
+
+  /**
+   * 获取 LAppView 实例
+   */
+  public getView(): LAppView {
+    return this._view;
   }
 
   /**

@@ -153,12 +153,13 @@ export class LAppDelegate {
 
   /**
    * APPに必要な物を初期化する。
+   * @param targetContainer 画布挂载目标容器（默认 document.body）
    */
-  public initialize(): boolean {
+  public initialize(targetContainer?: HTMLElement): boolean {
     // Cubism SDKの初期化
     this.initializeCubism();
 
-    this.initializeSubdelegates();
+    this.initializeSubdelegates(targetContainer);
     this.initializeEventListener();
 
     return true;
@@ -205,17 +206,15 @@ export class LAppDelegate {
 
   /**
    * Canvasを生成配置、Subdelegateを初期化する
+   * @param targetContainer 画布挂载目标容器（默认 document.body）
    */
-  private initializeSubdelegates(): void {
-    let width: number = 100;
-    let height: number = 100;
-    if (LAppDefine.CanvasNum > 3) {
-      const widthunit: number = Math.ceil(Math.sqrt(LAppDefine.CanvasNum));
-      const heightUnit = Math.ceil(LAppDefine.CanvasNum / widthunit);
-      width = 100.0 / widthunit;
-      height = 100.0 / heightUnit;
-    } else {
-      width = 100.0 / LAppDefine.CanvasNum;
+  private initializeSubdelegates(targetContainer?: HTMLElement): void {
+    const container = targetContainer || document.body;
+
+    // 确保容器有定位上下文（非 static）
+    const containerStyle = window.getComputedStyle(container);
+    if (containerStyle.position === 'static') {
+      container.style.position = 'relative';
     }
 
     this._canvases.length = LAppDefine.CanvasNum;
@@ -223,11 +222,12 @@ export class LAppDelegate {
     for (let i = 0; i < LAppDefine.CanvasNum; i++) {
       const canvas = document.createElement('canvas');
       this._canvases[i] = canvas;
-      canvas.style.width = `${width}vw`;
-      canvas.style.height = `${height}vh`;
+      canvas.style.width = '100%';
+      canvas.style.height = '100%';
+      canvas.style.display = 'block';
 
       // キャンバスを DOM に追加
-      document.body.appendChild(canvas);
+      container.appendChild(canvas);
     }
 
     for (let i = 0; i < this._canvases.length; i++) {

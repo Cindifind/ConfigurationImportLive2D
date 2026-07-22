@@ -60,23 +60,83 @@ export class LAppLive2DManager {
     }
 
     const model: LAppModel = this._models[0];
+    let handled = false;
 
-    if (model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
-      if (LAppDefine.DebugLogEnable) {
-        LAppPal.printMessage(`[APP]hit area: [${LAppDefine.HitAreaNameHead}]`);
+    // 1. 检查自定义触控区域回调
+    if (model && this._hitAreaCallbacks.size > 0) {
+      const setting = (model as any)._modelSetting;
+      if (setting) {
+        const hitCount = setting.getHitAreasCount?.() || 0;
+        for (let i = 0; i < hitCount; i++) {
+          const name: string = setting.getHitAreaName(i);
+          const cbs = this._hitAreaCallbacks.get(name);
+          if (cbs && model.hitTest(name, x, y)) {
+            for (const cb of cbs) {
+              try { cb(name, x, y); } catch (e) { console.error(e); }
+            }
+            handled = true;
+            break;
+          }
+        }
       }
-      model.setRandomExpression();
-    } else if (model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
-      if (LAppDefine.DebugLogEnable) {
-        LAppPal.printMessage(`[APP]hit area: [${LAppDefine.HitAreaNameBody}]`);
-      }
-      model.startRandomMotion(
-        LAppDefine.MotionGroupTapBody,
-        LAppDefine.PriorityNormal,
-        this.finishedMotion,
-        this.beganMotion
-      );
     }
+
+    // 2. 触发任意点击回调
+    for (const cb of this._onAnyTapCallbacks) {
+      try { cb(x, y); } catch (e) { console.error(e); }
+    }
+
+    // 3. 默认行为（仅在未被子定义回调处理时执行）
+    if (!handled) {
+      if (model) {
+        if (model.hitTest(LAppDefine.HitAreaNameHead, x, y)) {
+          if (LAppDefine.DebugLogEnable) {
+            LAppPal.printMessage(`[APP]hit area: [${LAppDefine.HitAreaNameHead}]`);
+          }
+          model.setRandomExpression();
+        } else if (model.hitTest(LAppDefine.HitAreaNameBody, x, y)) {
+          if (LAppDefine.DebugLogEnable) {
+            LAppPal.printMessage(`[APP]hit area: [${LAppDefine.HitAreaNameBody}]`);
+          }
+          model.startRandomMotion(
+            LAppDefine.MotionGroupTapBody,
+            LAppDefine.PriorityNormal,
+            this.finishedMotion,
+            this.beganMotion
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * 注册自定义触控区域回调
+   * @param areaName 区域名（来自模型 .cdi3.json 定义的 HitArea）
+   * @param callback 命中时回调 (areaName, x, y) => void
+   */
+  public addHitAreaCallback(areaName: string, callback: (areaName: string, x: number, y: number) => void): void {
+    if (!this._hitAreaCallbacks.has(areaName)) {
+      this._hitAreaCallbacks.set(areaName, []);
+    }
+    this._hitAreaCallbacks.get(areaName)!.push(callback);
+  }
+
+  /**
+   * 移除自定义触控区域回调
+   */
+  public removeHitAreaCallback(areaName: string, callback: (areaName: string, x: number, y: number) => void): void {
+    const cbs = this._hitAreaCallbacks.get(areaName);
+    if (cbs) {
+      const idx = cbs.indexOf(callback);
+      if (idx >= 0) cbs.splice(idx, 1);
+    }
+  }
+
+  /**
+   * 注册任意点击回调（不区分区域）
+   */
+  public onAnyTap(callback: (x: number, y: number) => void): void {
+    this._onAnyTapCallbacks.push(callback);
   }
 
   /**
@@ -204,6 +264,8 @@ export class LAppLive2DManager {
   _viewMatrix: CubismMatrix44; // モデル描画に用いるview行列
   _models: Array<LAppModel>; // モデルインスタンスのコンテナ
   private _sceneIndex: number; // 表示するシーンのインデックス値
+  private _hitAreaCallbacks: Map<string, Array<(areaName: string, x: number, y: number) => void>> = new Map();
+  private _onAnyTapCallbacks: Array<(x: number, y: number) => void> = [];
 
   // モーション再生開始のコールバック関数
   beganMotion = (self: ACubismMotion): void => {

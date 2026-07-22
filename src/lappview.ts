@@ -36,6 +36,23 @@ export class LAppView {
 
     // 画面の表示の拡大縮小や移動の変換を行う行列
     this._viewMatrix = new CubismViewMatrix();
+
+    // 用户缩放（等比例，最大 1.0）
+    this._userScale = 1.0;
+    this._baseViewMatrix = new CubismMatrix44();
+    this._renderTempMatrix = new CubismMatrix44();
+    this._isResizing = false;
+    this._resizeStartDistance = 0;
+    this._resizeStartScale = 1.0;
+
+    // 模型拖拽平移
+    this._panX = 0;
+    this._panY = 0;
+    this._isPanning = false;
+    this._panStartX = 0;
+    this._panStartY = 0;
+    this._panBaseX = 0;
+    this._panBaseY = 0;
   }
 
   /**
@@ -75,6 +92,20 @@ export class LAppView {
       LAppDefine.ViewLogicalMaxBottom,
       LAppDefine.ViewLogicalMaxTop
     );
+
+    // 保存基准矩阵（scale=1.0 时的状态，用于用户缩放）
+    this.saveBaseMatrix();
+  }
+
+  /**
+   * 保存当前 viewMatrix 状态作为缩放基准
+   */
+  public saveBaseMatrix(): void {
+    const arr = this._viewMatrix.getArray();
+    const base = this._baseViewMatrix.getArray();
+    for (let i = 0; i < 16; i++) {
+      base[i] = arr[i];
+    }
   }
 
   /**
@@ -115,7 +146,17 @@ export class LAppView {
 
     const lapplive2dmanager = this._subdelegate.getLive2DManager();
     if (lapplive2dmanager != null) {
-      lapplive2dmanager.setViewMatrix(this._viewMatrix);
+      // 应用用户缩放 + 平移（基于基准矩阵）
+      if (this._userScale !== 1.0 || this._panX !== 0 || this._panY !== 0) {
+        const base = this._baseViewMatrix.getArray();
+        const temp = this._renderTempMatrix.getArray();
+        for (let i = 0; i < 16; i++) temp[i] = base[i];
+        this._renderTempMatrix.translateRelative(this._panX, this._panY);
+        this._renderTempMatrix.scaleRelative(this._userScale, this._userScale);
+        lapplive2dmanager.setViewMatrix(this._renderTempMatrix);
+      } else {
+        lapplive2dmanager.setViewMatrix(this._viewMatrix);
+      }
 
       lapplive2dmanager.onUpdate();
     }
@@ -301,4 +342,133 @@ export class LAppView {
   _changeModel: boolean; // モデル切り替えフラグ
   _isClick: boolean; // クリック中
   private _subdelegate: LAppSubdelegate;
+
+  // 用户缩放（等比例，仅缩小，最大1.0）
+  private _userScale: number;
+  private _baseViewMatrix: CubismMatrix44; // 基准矩阵（scale=1.0时的快照）
+  private _renderTempMatrix: CubismMatrix44; // 渲染用的临时矩阵
+  private _isResizing: boolean;
+  private _resizeStartDistance: number;
+  private _resizeStartScale: number;
+
+  // 模型拖拽平移（逻辑坐标）
+  private _panX: number;
+  private _panY: number;
+  private _isPanning: boolean;
+  private _panStartX: number;
+  private _panStartY: number;
+  private _panBaseX: number;
+  private _panBaseY: number;
+
+  /**
+   * 设置用户缩放比例（等比例，仅缩小，范围 [0.3, 1.0]）
+   */
+  public setUserScale(scale: number): void {
+    this._userScale = Math.max(0.3, Math.min(1.0, scale));
+  }
+
+  public getUserScale(): number { return this._userScale; }
+
+  public zoomByWheel(delta: number): void {
+    const step = 0.05;
+    if (delta > 0) {
+      this._userScale = Math.min(1.0, this._userScale + step);
+    } else {
+      this._userScale = Math.max(0.3, this._userScale - step);
+    }
+  }
+
+  public beginResizeDrag(startX: number, startY: number, containerW: number, containerH: number): void {
+    this._isResizing = true;
+    this._resizeStartDistance = Math.sqrt(
+      (startX - containerW) * (startX - containerW) +
+      (startY - containerH) * (startY - containerH)
+    );
+    this._resizeStartScale = this._userScale;
+  }
+
+  public updateResizeDrag(currentX: number, currentY: number, containerW: number, containerH: number): void {
+    if (!this._isResizing) return;
+    const currentDistance = Math.sqrt(
+      (currentX - containerW) * (currentX - containerW) +
+      (currentY - containerH) * (currentY - containerH)
+    );
+    if (this._resizeStartDistance < 1) return;
+    const maxDistance = Math.sqrt(containerW * containerW + containerH * containerH);
+    let scale = currentDistance / maxDistance;
+    scale = Math.max(0.3, Math.min(1.0, scale));
+    this._userScale = scale;
+  }
+
+  public endResizeDrag(): void { this._isResizing = false; }
+  public isResizing(): boolean { return this._isResizing; }
+
+  // ===== 模型拖拽平移（逻辑坐标空间） =====
+
+  /**
+   * 获取 Canvas 像素 → 逻辑坐标的转换因子
+   */
+  private _getPixelToLogical(): { x: number; y: number } {
+    const canvas = this._subdelegate.getCanvas();
+    const ratio = canvas.width / canvas.height;
+    return {
+      x: (2 * ratio) / canvas.width,
+      y: 2.0 / canvas.height
+    };
+  }
+
+  /**
+   * 设置模型平移偏移（逻辑坐标）
+   */
+  public setModelPan(panX: number, panY: number): void {
+    this._panX = panX;
+    this._panY = panY;
+  }
+
+  public getModelPan(): { x: number; y: number } {
+    return { x: this._panX, y: this._panY };
+  }
+
+  /**
+   * 开始拖拽平移（参数为逻辑坐标）
+   */
+  public beginModelPan(logX: number, logY: number): void {
+    this._isPanning = true;
+    this._panStartX = logX;
+    this._panStartY = logY;
+    this._panBaseX = this._panX;
+    this._panBaseY = this._panY;
+  }
+
+  /**
+   * 更新拖拽平移
+   * @param pixelDX 指针在 X 方向的像素位移
+   * @param pixelDY 指针在 Y 方向的像素位移
+   */
+  public updateModelPanByPixel(pixelDX: number, pixelDY: number): void {
+    if (!this._isPanning) return;
+    const conv = this._getPixelToLogical();
+    this._panX = this._panBaseX + pixelDX * conv.x;
+    this._panY = this._panBaseY - pixelDY * conv.y; // Y 轴翻转
+  }
+
+  /**
+   * 结束拖拽平移
+   */
+  public endModelPan(): void {
+    this._isPanning = false;
+  }
+
+  /**
+   * 是否正在平移中
+   */
+  public isPanning(): boolean { return this._isPanning; }
+
+  /**
+   * 重置平移
+   */
+  public resetModelPan(): void {
+    this._panX = 0;
+    this._panY = 0;
+  }
 }

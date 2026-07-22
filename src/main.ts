@@ -12,6 +12,7 @@ import { CubismShaderManager_WebGL } from '@framework/rendering/cubismshader_web
 import { LAppLive2DManager } from './lapplive2dmanager';
 import { LAppSubdelegate } from './lappsubdelegate';
 import { LAppModel } from './lappmodel';
+import { LAppView } from './lappview';
 import { getTalkManager, TalkStartCallback, TalkEndCallback, TalkActionCallback, ModelBehaviorInfo } from './live2dtalkmanager';
 
 // 声明全局配置接口
@@ -87,7 +88,7 @@ function initApp(): void {
   console.log('[Live2D] initApp() 开始初始化...');
   
   // 从HTML元素获取配置
-  const container = document.getElementById('live2d-container') || document.querySelector('[data-cubism-model]');
+  const configElement = document.getElementById('live2d-container') || document.querySelector('[data-cubism-model]');
   
   // 默认使用 lappdefine 中的 ResourcesPath（支持跨域CDN配置）
   let modelPath = LAppDefine.ResourcesPath;
@@ -97,19 +98,39 @@ function initApp(): void {
   let showBackground = true; // 默认显示背景图
   let backgroundImage = '';  // 自定义背景图路径（空字符串 = 使用默认）
   let shaderPath = '';       // 自定义着色器路径（空字符串 = 使用默认）
-  if (container) {
-    const htmlModelPath = container.getAttribute('data-model-path');
-    const htmlModelName = container.getAttribute('data-cubism-model');
-    const htmlShowBg = container.getAttribute('data-show-background');
-    const htmlBgImage = container.getAttribute('data-background-image');
-    const htmlShaderPath = container.getAttribute('data-shader-path');
-    
+  let targetContainer: HTMLElement | undefined = undefined;
+
+  if (configElement) {
+    const htmlModelPath = configElement.getAttribute('data-model-path');
+    const htmlModelName = configElement.getAttribute('data-cubism-model');
+    const htmlShowBg = configElement.getAttribute('data-show-background');
+    const htmlBgImage = configElement.getAttribute('data-background-image');
+    const htmlShaderPath = configElement.getAttribute('data-shader-path');
+    const htmlContainer = configElement.getAttribute('data-container');
+
     if (htmlModelPath) modelPath = htmlModelPath;
     if (htmlModelName) modelName = htmlModelName;
     if (htmlShowBg !== null) showBackground = htmlShowBg === 'true';
     if (htmlBgImage !== null) backgroundImage = htmlBgImage;
     if (htmlShaderPath !== null) shaderPath = htmlShaderPath;
-    console.log(`[Live2D] HTML配置: modelPath=${modelPath}, modelName=${modelName}, showBackground=${showBackground}, bgImage=${backgroundImage || '默认'}, shaderPath=${shaderPath || '默认'}`);
+
+    // 容器：data-container 可以是 CSS 选择器，未指定则使用配置元素自身
+    if (htmlContainer) {
+      targetContainer = document.querySelector(htmlContainer) as HTMLElement || undefined;
+      if (!targetContainer) {
+        console.warn(`[Live2D] data-container 选择器 "${htmlContainer}" 未匹配到任何元素，回退到配置元素自身`);
+      }
+    }
+    if (!targetContainer) {
+      targetContainer = configElement as HTMLElement;
+    }
+
+    // 检查通过 API 设置的容器覆盖
+    if ((window as any)._live2dContainer) {
+      targetContainer = (window as any)._live2dContainer;
+    }
+
+    console.log(`[Live2D] HTML配置: modelPath=${modelPath}, modelName=${modelName}, showBackground=${showBackground}, bgImage=${backgroundImage || '默认'}, shaderPath=${shaderPath || '默认'}, container=${htmlContainer || '(自身)'}`);
   } else {
     console.log('[Live2D] 未检测到 HTML 容器属性');
     const urlParams = new URLSearchParams(window.location.search);
@@ -138,7 +159,7 @@ function initApp(): void {
   console.log(`[Live2D] 开始初始化 WebGL 和应用程序...`);
   
   // Initialize WebGL and create the application instance
-  if (!LAppDelegate.getInstance().initialize()) {
+  if (!LAppDelegate.getInstance().initialize(targetContainer)) {
     console.error('[Live2D] LAppDelegate.initialize() 失败!');
     return;
   }
@@ -248,6 +269,41 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    */
   refresh(): void {
     location.reload();
+  },
+
+  /**
+   * 获取画布所在的容器元素
+   * @returns HTML 容器元素
+   */
+  getContainer(): HTMLElement | null {
+    const sd = getSubdelegate();
+    if (sd) {
+      const canvas = sd.getCanvas();
+      return canvas ? canvas.parentElement : null;
+    }
+    return null;
+  },
+
+  /**
+   * 设置画布容器（需在初始化前调用，否则需 refresh()）
+   * @param el 目标容器元素 或 CSS 选择器字符串
+   *
+   * 用法：
+   *   // 方式一：传入元素
+   *   Live2DModel.setContainer(document.getElementById('my-wrapper'));
+   *
+   *   // 方式二：传入选择器
+   *   Live2DModel.setContainer('#my-wrapper');
+   */
+  setContainer(el: HTMLElement | string): void {
+    const element = typeof el === 'string' ? document.querySelector(el) as HTMLElement : el;
+    if (!element) {
+      console.warn('[Live2DModel] setContainer: 未找到目标元素');
+      return;
+    }
+    // 存储引用，下次 refresh() 时使用
+    (window as any)._live2dContainer = element;
+    console.log('[Live2DModel] 容器已设置（需 refresh() 生效）');
   },
 
   /**
@@ -376,5 +432,200 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    */
   setTalkMotionGroup(groupName: string): void {
     getTalkManager().setTalkMotionGroup(groupName);
+  },
+
+  // ===== 缩放控制 =====
+
+  /**
+   * 获取 LAppView 实例（内部使用）
+   */
+  _getView(): LAppView | null {
+    const sd = getSubdelegate();
+    return sd ? sd.getView() : null;
+  },
+
+  /**
+   * 设置用户缩放比例（等比例，仅缩小，范围 0.3 ~ 1.0）
+   * @param scale 缩放值，自动钳位
+   */
+  setScale(scale: number): void {
+    const view = this._getView();
+    if (view) view.setUserScale(scale);
+  },
+
+  /**
+   * 获取当前缩放比例
+   * @returns 0.3 ~ 1.0
+   */
+  getScale(): number {
+    const view = this._getView();
+    return view ? view.getUserScale() : 1.0;
+  },
+
+  /**
+   * 滚轮缩放（等比例，仅缩小）
+   * @param delta 滚轮 deltaY 值
+   */
+  zoomByWheel(delta: number): void {
+    const view = this._getView();
+    if (view) view.zoomByWheel(delta);
+  },
+
+  /**
+   * 开始拖拽缩放
+   * @param x 起始指针 X
+   * @param y 起始指针 Y
+   * @param cw 容器宽
+   * @param ch 容器高
+   */
+  beginResizeDrag(x: number, y: number, cw: number, ch: number): void {
+    const view = this._getView();
+    if (view) view.beginResizeDrag(x, y, cw, ch);
+  },
+
+  /**
+   * 拖拽缩放更新
+   */
+  updateResizeDrag(x: number, y: number, cw: number, ch: number): void {
+    const view = this._getView();
+    if (view) view.updateResizeDrag(x, y, cw, ch);
+  },
+
+  /**
+   * 结束拖拽缩放
+   */
+  endResizeDrag(): void {
+    const view = this._getView();
+    if (view) view.endResizeDrag();
+  },
+
+  // ===== 模型拖拽平移 =====
+
+  /**
+   * 开始拖拽平移模型
+   * @param x 指针起始 X（页面坐标）
+   * @param y 指针起始 Y（页面坐标）
+   */
+  beginModelPan(x: number, y: number): void {
+    const view = this._getView();
+    if (view) {
+      const canvas = (view as any)._subdelegate?.getCanvas();
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const conv = (view as any)._getPixelToLogical?.() || { x: 0.002, y: 0.002 };
+        const logX = (x - rect.left) * conv.x - 1;
+        const logY = (rect.bottom - y) * conv.y - 1;
+        view.beginModelPan(logX, logY);
+      }
+    }
+  },
+
+  /**
+   * 更新拖拽平移（参数为像素位移）
+   * @param pixelDX 指针 X 方向位移 px
+   * @param pixelDY 指针 Y 方向位移 px
+   */
+  updateModelPan(pixelDX: number, pixelDY: number): void {
+    const view = this._getView();
+    if (view) view.updateModelPanByPixel(pixelDX, pixelDY);
+  },
+
+  /**
+   * 结束拖拽平移
+   */
+  endModelPan(): void {
+    const view = this._getView();
+    if (view) view.endModelPan();
+  },
+
+  /**
+   * 重置模型位置到原点
+   */
+  resetModelPan(): void {
+    const view = this._getView();
+    if (view) view.resetModelPan();
+  },
+
+  // ===== 自定义触控区域 =====
+
+  /**
+   * 注册模型触控区域回调（区域名来自 .cdi3.json HitArea 定义）
+   * @param areaName 区域名，如 'Head', 'Body'，或自定义名称
+   * @param callback 命中回调 (areaName, x, y) => void
+   *
+   * 用法：
+   *   Live2DModel.onHitArea('Head', (name, x, y) => {
+   *     console.log(`点击了${name}`);
+   *     Live2DModel.startTalk('', '别摸头！');
+   *   });
+   */
+  onHitArea(areaName: string, callback: (areaName: string, x: number, y: number) => void): void {
+    const mgr = getLive2DManager();
+    if (mgr) mgr.addHitAreaCallback(areaName, callback);
+  },
+
+  /**
+   * 移除触控区域回调
+   */
+  offHitArea(areaName: string, callback: (areaName: string, x: number, y: number) => void): void {
+    const mgr = getLive2DManager();
+    if (mgr) mgr.removeHitAreaCallback(areaName, callback);
+  },
+
+  /**
+   * 注册任意点击回调（不区分区域，每次点击都触发）
+   * @param callback (x, y) => void
+   */
+  onAnyTap(callback: (x: number, y: number) => void): void {
+    const mgr = getLive2DManager();
+    if (mgr) mgr.onAnyTap(callback);
+  },
+
+  // ===== 通用动作注册表 =====
+
+  /**
+   * 注册一个命名动作（通用，不仅限于 talk）
+   * @param name 动作名称
+   * @param fn   动作函数，参数由调用者传入
+   *
+   * 用法：
+   *   Live2DModel.registerAction('greet', (text) => {
+   *     Live2DModel.startTalk('', text);
+   *   });
+   *   Live2DModel.triggerAction('greet', '你好！');
+   */
+  registerAction(name: string, fn: (...args: any[]) => void): void {
+    _actionRegistry.set(name, fn);
+  },
+
+  /**
+   * 触发已注册的命名动作
+   * @param name 动作名称
+   * @param args 传递给动作函数的参数
+   */
+  triggerAction(name: string, ...args: any[]): void {
+    const fn = _actionRegistry.get(name);
+    if (fn) {
+      try { fn(...args); } catch (e) { console.error(`[Live2DModel] action "${name}" 执行出错:`, e); }
+    } else {
+      console.warn(`[Live2DModel] 未注册的 action: "${name}"`);
+    }
+  },
+
+  /**
+   * 移除已注册的动作
+   */
+  unregisterAction(name: string): void {
+    _actionRegistry.delete(name);
+  },
+
+  /**
+   * 获取所有已注册的动作名称
+   */
+  listActions(): string[] {
+    return Array.from(_actionRegistry.keys());
   }
 };
+
+// ===== 动作注册表 =====
+const _actionRegistry = new Map<string, (...args: any[]) => void>();
