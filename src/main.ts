@@ -195,6 +195,36 @@ window.addEventListener(
   { passive: true }
 );
 
+// ===== 就绪状态管理 =====
+let _ready = false;
+const _onReadyCallbacks: Array<() => void> = [];
+
+/** 模型未就绪时静默跳过 */
+function guard(): boolean {
+  if (!_ready) return false;
+  return true;
+}
+
+/** 启动内部就绪检查器 */
+function _startReadyChecker(): void {
+  const check = (): void => {
+    const mgr = DynamicModelLoader.getLive2DManager();
+    if (mgr && (mgr as any)._models && (mgr as any)._models.length > 0) {
+      const model = (mgr as any)._models[0] as LAppModel;
+      if (model && (model as any)._state === 78) {
+        _ready = true;
+        const cbs = _onReadyCallbacks.splice(0);
+        for (const cb of cbs) { try { cb(); } catch (e) { console.error(e); } }
+        return;
+      }
+    }
+    setTimeout(check, 100);
+  };
+  setTimeout(check, 200);
+}
+
+_startReadyChecker();
+
 // ===== 对外暴露的 API (window.Live2DModel) =====
 function getLive2DManager(): LAppLive2DManager | null {
   return DynamicModelLoader.getLive2DManager();
@@ -222,10 +252,11 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    * @param name 模型名称，如 'Haru', 'Mao' 等
    */
   changeModel(name: string): void {
+    if (!guard()) return;
     const config = (window as any).Live2DConfig;
     const manager = getLive2DManager();
     if (!manager) {
-      console.warn('[Live2DModel] 管理器未就绪，请等待初始化完成后调用');
+      console.warn('[Live2DModel] 管理器未就绪');
       return;
     }
     const modelPath = config?.modelPath || LAppDefine.ResourcesPath;
@@ -236,37 +267,31 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
   },
 
   /**
-   * 运行时切换背景显示（无需刷新页面）
-   * @param show true=显示, false=隐藏
+   * 运行时切换背景显示
    */
   showBackground(show: boolean): void {
+    if (!guard()) return;
     const config = (window as any).Live2DConfig;
     if (config) config.showBackground = show;
-    // 背景图已在初始化时加载，此开关影响 render() 中的绘制判断
     console.log(`[Live2DModel] 背景显示: ${show}`);
   },
 
   /**
-   * 设置配置项（需刷新页面生效）
-   * @param key 配置键: 'modelPath' | 'modelName' | 'showBackground' | 'backgroundImage' | 'shaderPath'
-   * @param value 配置值
+   * 设置配置项
    */
   setConfig(key: string, value: string | boolean): void {
+    if (!guard()) return;
     const config = (window as any).Live2DConfig || {};
     (config as any)[key] = value;
     (window as any).Live2DConfig = config;
-    // 同步更新 DOM 属性
     const container = document.getElementById('live2d-container') || document.querySelector('[data-cubism-model]');
     if (container) {
       const attrName = 'data-' + key.replace(/([A-Z])/g, '-$1').toLowerCase();
       container.setAttribute(attrName, String(value));
     }
-    console.log(`[Live2DModel] 配置已更新: ${key} = ${value}（刷新页面后生效）`);
+    console.log(`[Live2DModel] 配置已更新: ${key} = ${value}`);
   },
 
-  /**
-   * 刷新页面（应用配置更改）
-   */
   refresh(): void {
     location.reload();
   },
@@ -308,21 +333,23 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
 
   /**
    * 注册初始化完成回调
+   * 如果模型已就绪，立即执行；否则排队等待
    * @param cb 回调函数
    */
   onReady(cb: () => void): void {
-    const check = () => {
-      const manager = getLive2DManager();
-      if (manager && (manager as any)._models && (manager as any)._models.length > 0) {
-        const model = (manager as any)._models[0] as LAppModel;
-        if (model && (model as any)._state === 78) { // LoadStep.CompleteSetup = 78
-          cb();
-          return;
-        }
-      }
-      setTimeout(check, 200);
-    };
-    setTimeout(check, 200);
+    if (_ready) { cb(); return; }
+    _onReadyCallbacks.push(cb);
+  },
+
+  /**
+   * 返回 Promise，在模型就绪时 resolve
+   * 用法: await Live2DModel.whenReady()
+   */
+  async whenReady(): Promise<void> {
+    if (_ready) return;
+    return new Promise(resolve => {
+      _onReadyCallbacks.push(resolve);
+    });
   },
 
   // ===== 说话 / 气泡钩子 =====
@@ -333,37 +360,27 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    * @param text     说话文本（显示在气泡中）
    */
   startTalk(audioUrl: string, text?: string): void {
+    if (!guard()) return;
     getTalkManager().startTalk(audioUrl, text);
   },
 
-  /**
-   * 停止当前说话
-   */
   stopTalk(): void {
+    if (!guard()) return;
     getTalkManager().stopTalk();
   },
 
-  /**
-   * 开启自动说话（随机间隔触发）
-   * @param minIntervalMs 最小间隔（毫秒），默认 8000
-   * @param maxIntervalMs 最大间隔（毫秒），默认 20000
-   */
   startAutoTalk(minIntervalMs?: number, maxIntervalMs?: number): void {
+    if (!guard()) return;
     getTalkManager().startAutoTalk(minIntervalMs, maxIntervalMs);
   },
 
-  /**
-   * 停止自动说话
-   */
   stopAutoTalk(): void {
+    if (!guard()) return;
     getTalkManager().stopAutoTalk();
   },
 
-  /**
-   * 设置自动说话的文本库
-   * @param texts 文本数组
-   */
   setTalkTexts(texts: string[]): void {
+    if (!guard()) return;
     getTalkManager().setTalkTexts(texts);
   },
 
@@ -420,130 +437,37 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    *   });
    */
   setTalkAction(action: TalkActionCallback | null): void {
+    if (!guard()) return;
     getTalkManager().setTalkAction(action);
   },
 
-  /**
-   * 指定自动说话时使用的 motion 组名（简单配置方式）
-   * @param groupName motion 组名，如 'Talk', 'Speak'，传空字符串恢复自动检测
-   *
-   * 用法：
-   *   Live2DModel.setTalkMotionGroup('Talk');
-   */
   setTalkMotionGroup(groupName: string): void {
+    if (!guard()) return;
     getTalkManager().setTalkMotionGroup(groupName);
   },
 
   // ===== 缩放控制 =====
 
-  /**
-   * 获取 LAppView 实例（内部使用）
-   */
   _getView(): LAppView | null {
     const sd = getSubdelegate();
     return sd ? sd.getView() : null;
   },
 
-  /**
-   * 设置用户缩放比例（等比例，仅缩小，范围 0.3 ~ 1.0）
-   * @param scale 缩放值，自动钳位
-   */
   setScale(scale: number): void {
+    if (!guard()) return;
     const view = this._getView();
     if (view) view.setUserScale(scale);
   },
 
-  /**
-   * 获取当前缩放比例
-   * @returns 0.3 ~ 1.0
-   */
   getScale(): number {
     const view = this._getView();
     return view ? view.getUserScale() : 1.0;
   },
 
-  /**
-   * 滚轮缩放（等比例，仅缩小）
-   * @param delta 滚轮 deltaY 值
-   */
   zoomByWheel(delta: number): void {
+    if (!guard()) return;
     const view = this._getView();
     if (view) view.zoomByWheel(delta);
-  },
-
-  /**
-   * 开始拖拽缩放
-   * @param x 起始指针 X
-   * @param y 起始指针 Y
-   * @param cw 容器宽
-   * @param ch 容器高
-   */
-  beginResizeDrag(x: number, y: number, cw: number, ch: number): void {
-    const view = this._getView();
-    if (view) view.beginResizeDrag(x, y, cw, ch);
-  },
-
-  /**
-   * 拖拽缩放更新
-   */
-  updateResizeDrag(x: number, y: number, cw: number, ch: number): void {
-    const view = this._getView();
-    if (view) view.updateResizeDrag(x, y, cw, ch);
-  },
-
-  /**
-   * 结束拖拽缩放
-   */
-  endResizeDrag(): void {
-    const view = this._getView();
-    if (view) view.endResizeDrag();
-  },
-
-  // ===== 模型拖拽平移 =====
-
-  /**
-   * 开始拖拽平移模型
-   * @param x 指针起始 X（页面坐标）
-   * @param y 指针起始 Y（页面坐标）
-   */
-  beginModelPan(x: number, y: number): void {
-    const view = this._getView();
-    if (view) {
-      const canvas = (view as any)._subdelegate?.getCanvas();
-      if (canvas) {
-        const rect = canvas.getBoundingClientRect();
-        const conv = (view as any)._getPixelToLogical?.() || { x: 0.002, y: 0.002 };
-        const logX = (x - rect.left) * conv.x - 1;
-        const logY = (rect.bottom - y) * conv.y - 1;
-        view.beginModelPan(logX, logY);
-      }
-    }
-  },
-
-  /**
-   * 更新拖拽平移（参数为像素位移）
-   * @param pixelDX 指针 X 方向位移 px
-   * @param pixelDY 指针 Y 方向位移 px
-   */
-  updateModelPan(pixelDX: number, pixelDY: number): void {
-    const view = this._getView();
-    if (view) view.updateModelPanByPixel(pixelDX, pixelDY);
-  },
-
-  /**
-   * 结束拖拽平移
-   */
-  endModelPan(): void {
-    const view = this._getView();
-    if (view) view.endModelPan();
-  },
-
-  /**
-   * 重置模型位置到原点
-   */
-  resetModelPan(): void {
-    const view = this._getView();
-    if (view) view.resetModelPan();
   },
 
   // ===== 自定义触控区域 =====
@@ -604,6 +528,7 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    * @param args 传递给动作函数的参数
    */
   triggerAction(name: string, ...args: any[]): void {
+    if (!guard()) return;
     const fn = _actionRegistry.get(name);
     if (fn) {
       try { fn(...args); } catch (e) { console.error(`[Live2DModel] action "${name}" 执行出错:`, e); }

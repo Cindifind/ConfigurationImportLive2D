@@ -102,6 +102,21 @@ export class DynamicModelLoader {
   }
 
   /**
+   * 获取 Live2DManager（异步，可等待就绪）
+   * @param maxWaitMs 最大等待毫秒，默认 3000
+   */
+  public static async waitForLive2DManager(maxWaitMs = 3000): Promise<LAppLive2DManager | null> {
+    const startTime = Date.now();
+    while (Date.now() - startTime < maxWaitMs) {
+      const mgr = this.getLive2DManager();
+      if (mgr) return mgr;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    console.error('[DynamicModelLoader] 等待 Live2DManager 超时');
+    return null;
+  }
+
+  /**
    * 从URL参数加载模型
    */
   public static loadModelFromUrlParams(): void {
