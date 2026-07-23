@@ -1,8 +1,7 @@
-// functions/_middleware.ts
+// edge-functions/[[default]].js
 export async function onRequest(context) {
-    const { request, next } = context;
+    const { request } = context;
 
-    // 1. 处理 OPTIONS 预检请求
     if (request.method === "OPTIONS") {
         return new Response(null, {
             status: 204,
@@ -15,18 +14,15 @@ export async function onRequest(context) {
         });
     }
 
-    // 2. 继续执行后续逻辑（静态资源 / API）
-    const response = await next();
-
-    // 3. 给所有响应注入 CORS 头
-    const newHeaders = new Headers(response.headers);
+    const upstream = await fetch(request);
+    const newHeaders = new Headers(upstream.headers);
     newHeaders.set("Access-Control-Allow-Origin", "*");
-    newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+    newHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
     newHeaders.set("Access-Control-Allow-Headers", "*");
 
-    return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
+    return new Response(upstream.body, {
+        status: upstream.status,
+        statusText: upstream.statusText,
         headers: newHeaders,
     });
 }
