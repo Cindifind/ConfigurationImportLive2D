@@ -84,15 +84,25 @@ container.addEventListener('wheel', (e) => {
 
 ---
 
-### 2.3 生命周期钩子
+### 2.3 生命周期 & 就绪状态
+
+模型加载完成前，突变类 API（`startTalk`、`setScale`、`changeModel` 等）静默无操作；钩子注册（`onReady`、`onTalkStart`、`onHitArea` 等）始终可调用。模型就绪后自动恢复所有功能。
 
 #### `Live2DModel.onReady(callback)`
-模型完成加载（纹理、着色器、动作全部就绪）时触发。
+模型就绪时触发。如果已就绪则立即执行。
 
 ```js
 Live2DModel.onReady(() => {
-  console.log('模型已就绪，可以开始交互');
+  console.log('模型已就绪');
 });
+```
+
+#### `Live2DModel.whenReady()`
+返回 Promise，模型就绪时 resolve。
+
+```js
+await Live2DModel.whenReady();
+// 可以安全调用所有 API
 ```
 
 ---
@@ -370,6 +380,63 @@ Live2DModel.setContainer('#sidebar-model');
 
 // 刷新生效
 Live2DModel.refresh();
+```
+
+---
+
+### 2.11 Motion 播放
+
+#### `Live2DModel.loadMotion(name, url)`
+加载外部 `.motion3.json` 文件并以名称注册。
+
+```js
+await Live2DModel.loadMotion('shy', './Elysia/motions/lasi.motion3.json');
+```
+
+#### `Live2DModel.playMotion(name, priority?)`
+播放已注册的 motion。优先级默认 3（强制）。
+
+```js
+Live2DModel.playMotion('shy');
+
+// 内置 motion（model3.json 自动加载的）用 group_index 格式
+Live2DModel.playMotion('Idle_0');
+Live2DModel.playMotion('TapBody_1');
+```
+
+---
+
+### 2.12 参数动画（关键帧）
+
+不依赖 motion 文件，直接操作模型参数值实现自定义动画。
+
+#### `Live2DModel.setAction(name, keyframes)`
+注册一个关键帧动画。每个关键帧：`paramId`（参数 ID）、`value`（目标值 0~1）、`delay`（距上一帧的毫秒延迟）。
+
+```js
+Live2DModel.setAction('捂胸', [
+  { paramId: 'Param19', value: 1, delay: 0    },  // 立即设为 1
+  { paramId: 'Param19', value: 0, delay: 1500 },  // 1.5 秒后归 0
+]);
+```
+
+> 参数 ID 来自模型 `.model3.json` 的 `Parameters` 段。
+
+#### `Live2DModel.playAction(name)`
+播放已注册的参数动画。
+
+```js
+Live2DModel.playAction('捂胸');
+```
+
+#### `Live2DModel.removeAction(name)`
+移除已注册的动画。
+
+#### `Live2DModel.listActionNames()`
+获取所有已注册的动画名称。
+
+```js
+console.log(Live2DModel.listActionNames()); // → ['捂胸']
 ```
 
 ---

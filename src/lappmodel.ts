@@ -744,6 +744,53 @@ export class LAppModel extends CubismUserModel {
   }
 
   /**
+   * 加载外部 .motion3.json 并以自定义名称注册
+   * @param arrayBuffer 文件数据
+   * @param motionId   自定义名称（如 "shy"）
+   */
+  public loadMotionById(arrayBuffer: ArrayBuffer, motionId: string): void {
+    const motion: CubismMotion = this.loadMotion(
+      arrayBuffer,
+      arrayBuffer.byteLength,
+      motionId,
+      null,
+      null,
+      this._modelSetting,
+      '',  // group (not used for custom motions)
+      0,   // no (not used)
+      this._motionConsistency
+    );
+    if (motion) {
+      motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
+      if (this._motions.get(motionId)) {
+        ACubismMotion.delete(this._motions.get(motionId));
+      }
+      this._motions.set(motionId, motion);
+    }
+  }
+
+  /**
+   * 按自定义名称播放已注册的 motion
+   * @param motionId 注册时的名称
+   * @param priority 优先级，默认 3（强制）
+   */
+  public playMotionById(motionId: string, priority = 3): CubismMotionQueueEntryHandle {
+    const motion = this._motions.get(motionId) as CubismMotion;
+    if (!motion) {
+      if (this._debugMode) {
+        LAppPal.printMessage(`[APP]motion not found: ${motionId}`);
+      }
+      return InvalidMotionQueueEntryHandleValue;
+    }
+    if (priority == LAppDefine.PriorityForce) {
+      this._motionManager.setReservePriority(priority);
+    } else if (!this._motionManager.reserveMotion(priority)) {
+      return InvalidMotionQueueEntryHandleValue;
+    }
+    return this._motionManager.startMotionPriority(motion, false, priority);
+  }
+
+  /**
    * 引数で指定した表情モーションをセットする
    *
    * @param expressionId 表情モーションのID

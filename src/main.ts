@@ -14,6 +14,7 @@ import { LAppSubdelegate } from './lappsubdelegate';
 import { LAppModel } from './lappmodel';
 import { LAppView } from './lappview';
 import { getTalkManager, TalkStartCallback, TalkEndCallback, TalkActionCallback, ModelBehaviorInfo } from './live2dtalkmanager';
+import { CubismFramework } from '@framework/live2dcubismframework';
 
 // 声明全局配置接口
 interface Window {
@@ -446,6 +447,47 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
     getTalkManager().setTalkMotionGroup(groupName);
   },
 
+  /**
+   * 加载外部 .motion3.json 并以名称注册
+   * @param name motion 名称（后续 playMotion 用此名称）
+   * @param url  .motion3.json 文件路径
+   *
+   * 用法：
+   *   await Live2DModel.loadMotion('shy', './Elysia/motions/lasi.motion3.json');
+   *   Live2DModel.playMotion('shy');
+   */
+  async loadMotion(name: string, url: string): Promise<void> {
+    const mgr = getLive2DManager();
+    if (!mgr) return;
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) return;
+    try {
+      const res = await fetch(url);
+      const buf = await res.arrayBuffer();
+      model.loadMotionById(buf, name);
+    } catch (e) {
+      console.error(`[Live2DModel] 加载 motion 失败: ${url}`, e);
+    }
+  },
+
+  /**
+   * 播放已注册的 motion
+   * @param name     加载时注册的名称
+   * @param priority 优先级，默认 3（强制）
+   *
+   * 用法：
+   *   Live2DModel.playMotion('shy');
+   */
+  playMotion(name: string, priority = 3): void {
+    if (!guard()) return;
+    const mgr = getLive2DManager();
+    if (!mgr) return;
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (model) {
+      model.playMotionById(name, priority);
+    }
+  },
+
   // ===== 缩放控制 =====
 
   _getView(): LAppView | null {
@@ -549,8 +591,65 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    */
   listActions(): string[] {
     return Array.from(_actionRegistry.keys());
+  },
+
+  // ===== 参数动画系统 =====
+
+  /**
+   * 注册一个参数动画（关键帧序列）
+   * @param name 动画名称
+   * @param keyframes 关键帧数组
+   *
+   * 每个关键帧：
+   *   paramId - 参数 ID（来自模型 .model3.json 的 Parameters 段）
+   *   value   - 目标值（通常 0~1）
+   *   delay   - 距上一个关键帧的延迟（毫秒），默认 0
+   *
+   * 用法：
+   *   Live2DModel.setAction('捂胸', [
+   *     { paramId: 'Param19', value: 1, delay: 0    },  // 立即设为 1
+   *     { paramId: 'Param19', value: 0, delay: 1500 },  // 1.5 秒后归 0
+   *   ]);
+   *
+   *   Live2DModel.playAction('捂胸');
+   */
+  setAction(name: string, keyframes: Array<{ paramId: string; value: number; delay?: number }>): void {
+    _animActions.set(name, keyframes);
+  },
+
+  playAction(name: string): void {
+    if (!guard()) return;
+    const kfs = _animActions.get(name);
+    if (!kfs) { console.warn(`[Live2DModel] 未注册的动画: "${name}"`); return; }
+    const mgr = getLive2DManager();
+    if (!mgr) return;
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) return;
+    const cubismModel = (model as any)._model;
+    if (!cubismModel) return;
+
+    let elapsed = 0;
+    for (const kf of kfs) {
+      elapsed += kf.delay || 0;
+      const id = CubismFramework.getIdManager().getId(kf.paramId);
+      const v = kf.value;
+      setTimeout(() => {
+        try { cubismModel.setParameterValueById(id, v); } catch (_) {}
+      }, elapsed);
+    }
+  },
+
+  removeAction(name: string): void {
+    _animActions.delete(name);
+  },
+
+  listActionNames(): string[] {
+    return Array.from(_animActions.keys());
   }
 };
 
 // ===== 动作注册表 =====
 const _actionRegistry = new Map<string, (...args: any[]) => void>();
+
+// ===== 参数动画注册表 =====
+const _animActions = new Map<string, Array<{ paramId: string; value: number; delay?: number }>>();
