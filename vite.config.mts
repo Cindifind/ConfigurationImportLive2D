@@ -27,6 +27,11 @@ export default defineConfig((env: ConfigEnv): UserConfig => {
       outDir: './dist',
       emptyOutDir: false,
       sourcemap: env.mode == 'development' ? true : false,
+      rollupOptions: {
+        output: {
+          entryFileNames: 'live2dplugin.js',
+        },
+      },
     },
   };
   return common;
