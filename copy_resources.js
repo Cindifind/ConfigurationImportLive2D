@@ -18,18 +18,22 @@ function findResourcePath(possiblePaths) {
   throw new Error(`Could not find resource directory. Tried paths: ${possiblePaths.join(', ')}`);
 }
 
-// 定义可能的资源路径
-const corePath = findResourcePath(['../../../Core', '../public/Core', './public/Core', '../../Core']);
-const resourcesPath = findResourcePath(['../../Resources', '../public/Resources', './public/Resources', '../Resources']);
-const shadersPath = findResourcePath(['../../../Framework/Shaders', '../public/Framework/Shaders', './public/Framework/Shaders', '../../Framework/Shaders']);
-const frameworkSrcPath = findResourcePath(['../../../Framework/src', '../public/Framework/src', './public/Framework/src', '../../Framework/src']);
+// 定义可能的资源路径（项目自包含，优先本地 public/）
+const corePath = findResourcePath(['./public/Core', '../public/Core', '../../../Core', '../../Core']);
+const resourcesPath = findResourcePath(['./public/Resources', '../public/Resources', '../../Resources', '../Resources']);
+const shadersPath = findResourcePath(['./public/Framework/Shaders', '../public/Framework/Shaders', '../../../Framework/Shaders', '../../Framework/Shaders']);
 
 const publicResources = [
   {src: corePath, dst: './public/Core'},
   {src: resourcesPath, dst: './public/Resources'},
   {src: shadersPath, dst: './public/Framework/Shaders'},
-  {src: frameworkSrcPath, dst: './public/Framework/src'},
 ];
 
-publicResources.forEach((e)=>{if (fs.existsSync(e.dst)) fs.rmSync(e.dst, { recursive: true })});
-publicResources.forEach((e)=>fs.cpSync(e.src, e.dst, {recursive: true}));
+publicResources.forEach((e) => {
+  if (!fs.existsSync(e.src)) return; // 源不存在则跳过
+  const srcAbs = fs.realpathSync(e.src);
+  const dstAbs = fs.existsSync(e.dst) ? fs.realpathSync(e.dst) : '';
+  if (srcAbs === dstAbs) return;
+  if (fs.existsSync(e.dst)) fs.rmSync(e.dst, { recursive: true });
+  fs.cpSync(e.src, e.dst, {recursive: true});
+});
