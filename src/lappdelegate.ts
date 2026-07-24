@@ -53,11 +53,21 @@ export class LAppDelegate {
   }
 
   /**
-   * ポインタが動いたら呼ばれる。
+   * ポインタが動いたら呼ばれる（按下拖拽用）。
    */
   private onPointerMoved(e: PointerEvent): void {
     for (let i = 0; i < this._subdelegates.length; i++) {
       this._subdelegates[i].onPointMoved(e.pageX, e.pageY);
+    }
+  }
+
+  /**
+   * 鼠标悬停时调用（无需按下），驱动头部跟随鼠标。
+   * 使用 clientX/clientY（视口坐标），配合 getBoundingClientRect。
+   */
+  private onPointerHover(e: PointerEvent): void {
+    for (let i = 0; i < this._subdelegates.length; i++) {
+      this._subdelegates[i].onPointHover(e.clientX, e.clientY);
     }
   }
 
@@ -133,6 +143,8 @@ export class LAppDelegate {
     this.pointBeganEventListener = null;
     document.removeEventListener('pointermove', this.pointMovedEventListener);
     this.pointMovedEventListener = null;
+    document.removeEventListener('pointermove', this.pointHoverEventListener);
+    this.pointHoverEventListener = null;
     document.removeEventListener('pointerdown', this.pointEndedEventListener);
     this.pointEndedEventListener = null;
     document.removeEventListener('pointerdown', this.pointCancelEventListener);
@@ -173,12 +185,17 @@ export class LAppDelegate {
     this.pointMovedEventListener = this.onPointerMoved.bind(this);
     this.pointEndedEventListener = this.onPointerEnded.bind(this);
     this.pointCancelEventListener = this.onPointerCancel.bind(this);
+    this.pointHoverEventListener = this.onPointerHover.bind(this);
 
     // ポインタ関連コールバック関数登録
     document.addEventListener('pointerdown', this.pointBeganEventListener, {
       passive: true
     });
     document.addEventListener('pointermove', this.pointMovedEventListener, {
+      passive: true
+    });
+    // 头部跟随鼠标（悬停，无需按下）
+    document.addEventListener('pointermove', this.pointHoverEventListener, {
       passive: true
     });
     document.addEventListener('pointerup', this.pointEndedEventListener, {
@@ -288,4 +305,9 @@ export class LAppDelegate {
    * 登録済みイベントリスナー 関数オブジェクト
    */
   private pointCancelEventListener: (this: Document, ev: PointerEvent) => void;
+
+  /**
+   * 头部跟随鼠标（悬停）
+   */
+  private pointHoverEventListener: (this: Document, ev: PointerEvent) => void;
 }

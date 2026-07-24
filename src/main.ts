@@ -11,7 +11,7 @@ import { DynamicModelLoader } from './dynamic_model_loader';
 import { CubismShaderManager_WebGL } from '@framework/rendering/cubismshader_webgl';
 import { LAppLive2DManager } from './lapplive2dmanager';
 import { LAppSubdelegate } from './lappsubdelegate';
-import { LAppModel } from './lappmodel';
+import { LAppModel, LoadStep } from './lappmodel';
 import { LAppView } from './lappview';
 import { getTalkManager, TalkStartCallback, TalkEndCallback, TalkActionCallback, ModelBehaviorInfo } from './live2dtalkmanager';
 import { CubismFramework } from '@framework/live2dcubismframework';
@@ -208,16 +208,40 @@ function guard(): boolean {
 
 /** 启动内部就绪检查器 */
 function _startReadyChecker(): void {
+  let pollCount = 0;
   const check = (): void => {
+    pollCount++;
     const mgr = DynamicModelLoader.getLive2DManager();
-    if (mgr && (mgr as any)._models && (mgr as any)._models.length > 0) {
-      const model = (mgr as any)._models[0] as LAppModel;
-      if (model && (model as any)._state === 78) {
-        _ready = true;
-        const cbs = _onReadyCallbacks.splice(0);
-        for (const cb of cbs) { try { cb(); } catch (e) { console.error(e); } }
-        return;
+    
+    if (!mgr) {
+      if (pollCount <= 3 || pollCount % 20 === 0) {
+        console.log(`[Live2D] onReady checker: manager 未就绪 (轮询${pollCount}次)`);
       }
+      setTimeout(check, 100);
+      return;
+    }
+    
+    const models = (mgr as any)._models;
+    if (!models || models.length === 0) {
+      if (pollCount <= 3 || pollCount % 20 === 0) {
+        console.log(`[Live2D] onReady checker: _models 为空 (轮询${pollCount}次)`);
+      }
+      setTimeout(check, 100);
+      return;
+    }
+    
+    const model = models[0] as LAppModel;
+    const state = (model as any)._state;
+    if (pollCount <= 3 || pollCount % 10 === 0) {
+      console.log(`[Live2D] onReady checker: model._state=${state} (轮询${pollCount}次)`);
+    }
+    
+    if (model && state === LoadStep.CompleteSetup) {
+      console.log(`[Live2D] onReady checker: 模型就绪! state=${state}, 待执行回调=${_onReadyCallbacks.length}`);
+      _ready = true;
+      const cbs = _onReadyCallbacks.splice(0);
+      for (const cb of cbs) { try { cb(); } catch (e) { console.error(e); } }
+      return;
     }
     setTimeout(check, 100);
   };
@@ -488,6 +512,20 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
     }
   },
 
+  /**
+   * 停止当前模型的所有 motion
+   */
+  stopAllMotions(): void {
+    if (!guard()) { console.warn('[Live2DModel] stopAllMotions: 模型未就绪'); return; }
+    const mgr = getLive2DManager();
+    if (!mgr) { console.warn('[Live2DModel] stopAllMotions: manager 为空'); return; }
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) { console.warn('[Live2DModel] stopAllMotions: model 为空'); return; }
+    console.log('[Live2DModel] stopAllMotions: 调用 model.stopAllMotions()');
+    model.stopAllMotions();
+    model.clearParamOverrides();
+  },
+
   // ===== 缩放控制 =====
 
   _getView(): LAppView | null {
@@ -618,33 +656,148 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
   },
 
   playAction(name: string): void {
-    if (!guard()) return;
+    if (!guard()) { console.warn(`[Live2DModel] playAction "${name}" 跳过（模型未就绪）`); return; }
     const kfs = _animActions.get(name);
     if (!kfs) { console.warn(`[Live2DModel] 未注册的动画: "${name}"`); return; }
     const mgr = getLive2DManager();
-    if (!mgr) return;
+    if (!mgr) { console.warn(`[Live2DModel] playAction: manager 为空`); return; }
     const model = (mgr as any)._models[0] as LAppModel;
-    if (!model) return;
-    const cubismModel = (model as any)._model;
-    if (!cubismModel) return;
+    if (!model) { console.warn(`[Live2DModel] playAction: model 为空`); return; }
 
+    // 计算每个关键帧的绝对开始时间和持续时间
+    // 持续时间 = 到同参数下一个关键帧的间隔（最后一个用 delay 或 500ms）
+    const schedule: Array<{ paramId: string; value: number; startMs: number; holdMs: number }> = [];
     let elapsed = 0;
-    for (const kf of kfs) {
+    for (let i = 0; i < kfs.length; i++) {
+      const kf = kfs[i];
       elapsed += kf.delay || 0;
-      const id = CubismFramework.getIdManager().getId(kf.paramId);
-      const v = kf.value;
-      setTimeout(() => {
-        try { cubismModel.setParameterValueById(id, v); } catch (_) {}
-      }, elapsed);
+      // 找同参数的下一个关键帧来计算 hold 时间
+      let holdMs = 500; // 默认保持 500ms
+      for (let j = i + 1; j < kfs.length; j++) {
+        if (kfs[j].paramId === kf.paramId) {
+          let nextStart = 0;
+          for (let k = 0; k <= j; k++) nextStart += kfs[k].delay || 0;
+          holdMs = nextStart - elapsed;
+          break;
+        }
+      }
+      schedule.push({ paramId: kf.paramId, value: kf.value, startMs: elapsed, holdMs });
     }
+
+    // 用 setTimeout 触发每个关键帧，但通过 setParamOverride 让值在每帧持续生效
+    for (const s of schedule) {
+      setTimeout(() => {
+        model.setParamOverride(s.paramId, s.value, Date.now() + s.holdMs);
+        console.log(`[Live2DModel] ${s.paramId} = ${s.value} (hold ${s.holdMs}ms)`);
+      }, s.startMs);
+    }
+
+    // 标记动画结束
+    const totalDuration = elapsed + 500;
+    setTimeout(() => {
+      model._pendingActionFinish = true;
+    }, totalDuration);
   },
 
   removeAction(name: string): void {
     _animActions.delete(name);
   },
 
-  listActionNames(): string[] {
+  listAnimNames(): string[] {
     return Array.from(_animActions.keys());
+  },
+
+  /**
+   * 获取单个参数的完整信息
+   * @param paramId 参数 ID（如 'shy', 'Param91' 等）
+   * @returns { id, index, min, max, default, current } 或 null
+   *
+   * 用法：
+   *   Live2DModel.getParameter('shy')
+   *   // → { id: 'shy', index: 0, min: 0, max: 1, default: 0, current: 0.5 }
+   */
+  getParameter(paramId: string): { id: string; index: number; min: number; max: number; default: number; current: number } | null {
+    const mgr = getLive2DManager();
+    if (!mgr) return null;
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) return null;
+    const cubismModel = (model as any)._model;
+    if (!cubismModel) return null;
+
+    const id = CubismFramework.getIdManager().getId(paramId);
+    const index = cubismModel.getParameterIndex(id);
+    if (index < 0) return null;
+
+    return {
+      id: paramId,
+      index,
+      min: cubismModel.getParameterMinimumValue(index),
+      max: cubismModel.getParameterMaximumValue(index),
+      default: cubismModel.getParameterDefaultValue(index),
+      current: cubismModel.getParameterValueByIndex(index),
+    };
+  },
+
+  /**
+   * 列出模型所有参数的 ID、取值范围、默认值、当前值
+   * 返回数组并在 console 打印表格
+   *
+   * 用法：
+   *   const params = Live2DModel.listParameters()
+   *   // Console 输出表格，返回数组
+   */
+  listParameters(): Array<{ index: number; id: string; min: number; max: number; default: number; current: number }> {
+    const mgr = getLive2DManager();
+    if (!mgr) return [];
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) return [];
+    const cubismModel = (model as any)._model;
+    if (!cubismModel) return [];
+
+    const count = cubismModel.getParameterCount();
+    const result = Array.from({ length: count }, (_, i) => {
+      const cid = cubismModel.getParameterId(i);
+      const name = (typeof cid === 'object' ? cid.getString?.() : String(cid)) || '';
+      return {
+        index: i,
+        id: typeof cid === 'string' ? cid : (cid._id ?? name),
+        min: cubismModel.getParameterMinimumValue(i),
+        max: cubismModel.getParameterMaximumValue(i),
+        default: cubismModel.getParameterDefaultValue(i),
+        current: cubismModel.getParameterValueByIndex(i),
+      };
+    });
+
+    console.table(result);
+    return result;
+  },
+
+  /**
+   * 列出所有已注册的自定义动画及其关键帧详情
+   *
+   * 用法：
+   *   const anims = Live2DModel.listAnimActions()
+   *   // → [{ name: '脸红', keyframes: [{ paramId, value, delay }, ...] }, ...]
+   */
+  listAnimActions(): Array<{ name: string; keyframes: Array<{ paramId: string; value: number; delay: number }> }> {
+    const result: Array<{ name: string; keyframes: Array<{ paramId: string; value: number; delay: number }> }> = [];
+    for (const [name, kfs] of _animActions.entries()) {
+      result.push({
+        name,
+        keyframes: kfs.map(kf => ({ paramId: kf.paramId, value: kf.value, delay: kf.delay || 0 })),
+      });
+    }
+    if (result.length > 0) {
+      const tableRows: Array<{ action: string; step: number; paramId: string; value: number; delay: number }> = [];
+      for (const a of result) {
+        for (let i = 0; i < a.keyframes.length; i++) {
+          const kf = a.keyframes[i];
+          tableRows.push({ action: a.name, step: i, paramId: kf.paramId, value: kf.value, delay: kf.delay });
+        }
+      }
+      console.table(tableRows);
+    }
+    return result;
   }
 };
 

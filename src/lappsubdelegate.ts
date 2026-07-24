@@ -294,6 +294,35 @@ export class LAppSubdelegate {
   }
 
   /**
+   * 鼠标悬停（无需按下），头部跟随鼠标，覆盖整个页面。
+   * 使用 getBoundingClientRect 精确定位画布中心。
+   */
+  public onPointHover(clientX: number, clientY: number): void {
+    if (!this._view) return;
+
+    // getBoundingClientRect 给出 canvas 在视口中的精确位置
+    const rect = this._canvas.getBoundingClientRect();
+    const canvasCenterX = rect.left + rect.width * 0.5;
+    const canvasCenterY = rect.top + rect.height * 0.5;
+
+    // 以 canvas 尺寸一半为基准归一化
+    const halfW = rect.width * 0.5;
+    const halfH = rect.height * 0.5;
+
+    let viewX = (clientX - canvasCenterX) / halfW;
+    let viewY = (canvasCenterY - clientY) / halfH;
+
+    // 限制最大范围，防止过度旋转
+    viewX = Math.max(-1.5, Math.min(1.5, viewX));
+    viewY = Math.max(-1.5, Math.min(1.5, viewY));
+
+    const lapplive2dmanager = this.getLive2DManager();
+    if (lapplive2dmanager) {
+      lapplive2dmanager.onDrag(viewX, viewY);
+    }
+  }
+
+  /**
    * クリックが終了したら呼ばれる。
    */
   public onPointEnded(pageX: number, pageY: number): void {

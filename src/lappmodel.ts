@@ -24,6 +24,7 @@ import {
   FinishedMotionCallback
 } from '@framework/motion/acubismmotion';
 import { CubismMotion } from '@framework/motion/cubismmotion';
+import { CubismMotionManager } from '@framework/motion/cubismmotionmanager';
 import {
   CubismMotionQueueEntryHandle,
   InvalidMotionQueueEntryHandleValue
@@ -51,7 +52,7 @@ import { CubismMoc } from '@framework/model/cubismmoc';
 import { LAppDelegate } from './lappdelegate';
 import { LAppSubdelegate } from './lappsubdelegate';
 
-enum LoadStep {
+export enum LoadStep {
   LoadAssets,
   LoadModel,
   WaitLoadModel,
@@ -598,13 +599,16 @@ export class LAppModel extends CubismUserModel {
     this._userTimeSeconds += deltaTimeSeconds;
 
     //--------------------------------------------------------------------------
-    this._model.loadParameters(); // 前回セーブされた状態をロード
+    if (this._skipLoadParameters > 0) {
+      this._skipLoadParameters--;
+    } else {
+      this._model.loadParameters();
+    }
 
     // Reset motion updated flag each frame
     this._motionUpdated = false;
 
     if (this._motionManager.isFinished()) {
-      // モーションの再生がない場合、待機モーションの中からランダムで再生する
       this.startRandomMotion(
         LAppDefine.MotionGroupIdle,
         LAppDefine.PriorityIdle
@@ -613,15 +617,60 @@ export class LAppModel extends CubismUserModel {
       this._motionUpdated = this._motionManager.updateMotion(
         this._model,
         deltaTimeSeconds
-      ); // モーションを更新
+      );
     }
-    this._model.saveParameters(); // 状態を保存
+    this._model.saveParameters();
     //--------------------------------------------------------------------------
 
     // UpdateSchedulerによる一括エフェクト更新
     this._updateScheduler.onLateUpdate(this._model, deltaTimeSeconds);
 
+    // 在所有系统（motion、物理、眨眼等）更新完毕后，应用参数覆盖
+    // 这样 setAction/playAction 设置的值才能最终生效
+    this._applyParamOverrides();
+
     this._model.update();
+  }
+
+  /**
+   * 在 update() 最后阶段应用参数覆盖（由 playAction 注册）
+   * 确保自定义动画值在 motion/物理/眨眼等之后写入，不被覆盖
+   */
+  private _applyParamOverrides(): void {
+    const now = Date.now();
+    let anyActive = false;
+
+    for (const [paramId, entry] of this._paramOverrides) {
+      if (now >= entry.expires) {
+        this._paramOverrides.delete(paramId);
+        continue;
+      }
+      anyActive = true;
+      const id = CubismFramework.getIdManager().getId(paramId);
+      this._model.setParameterValueById(id, entry.value);
+    }
+
+    // 如果所有覆盖都已过期，标记动画结束
+    if (!anyActive && this._paramOverrides.size === 0 && this._pendingActionFinish) {
+      this._pendingActionFinish = false;
+    }
+  }
+
+  /**
+   * 注册参数覆盖（由 playAction 调用）
+   * @param paramId 参数 ID
+   * @param value   目标值
+   * @param expires 过期时间戳（Date.now() + duration）
+   */
+  public setParamOverride(paramId: string, value: number, expires: number): void {
+    this._paramOverrides.set(paramId, { value, expires });
+  }
+
+  /**
+   * 清除所有参数覆盖
+   */
+  public clearParamOverrides(): void {
+    this._paramOverrides.clear();
   }
 
   /**
@@ -788,6 +837,64 @@ export class LAppModel extends CubismUserModel {
       return InvalidMotionQueueEntryHandleValue;
     }
     return this._motionManager.startMotionPriority(motion, false, priority);
+  }
+
+  /**
+   * 停止所有モーション
+   * 直接替换 _motionManager + 重置参数 + 重置 savedParameters
+   */
+  public stopAllMotions(): void {
+    console.log('[LAppModel] stopAllMotions');
+
+    const oldCb = (this._motionManager as any)._eventCallBack;
+    const oldData = (this._motionManager as any)._eventCustomData;
+
+    this._motionManager.release();
+    this._motionManager = new CubismMotionManager();
+
+    if (oldCb) {
+      this._motionManager.setEventCallback(oldCb, oldData);
+    }
+
+    const cubismModel = this._model;
+    if (!cubismModel) {
+      console.warn('[LAppModel] stopAllMotions: _model 为空');
+      return;
+    }
+
+    // 直接写入底层参数数组
+    const rawModel = (cubismModel as any)._model;
+    if (!rawModel || !rawModel.parameters) {
+      console.warn('[LAppModel] stopAllMotions: rawModel 无效');
+      return;
+    }
+
+    const paramValues = rawModel.parameters.values;
+    const paramDefaults = rawModel.parameters.defaultValues;
+    const count = rawModel.parameters.count;
+    let resetCount = 0;
+
+    console.log(`[LAppModel] stopAllMotions: 共 ${count} 个参数`);
+
+    for (let i = 0; i < count; i++) {
+      if (paramValues[i] !== paramDefaults[i]) {
+        paramValues[i] = paramDefaults[i];
+        resetCount++;
+      }
+    }
+
+    // 同时重置 _savedParameters，防止下一帧 loadParameters 恢复旧值
+    const saved = (cubismModel as any)._savedParameters;
+    if (saved && saved.length > 0) {
+      for (let i = 0; i < Math.min(count, saved.length); i++) {
+        saved[i] = paramDefaults[i];
+      }
+    }
+
+    // 跳过接下来 2 帧的 loadParameters，防止恢复旧值
+    this._skipLoadParameters = 2;
+
+    console.log(`[LAppModel] stopAllMotions: 重置 ${resetCount} 个参数，完成`);
   }
 
   /**
@@ -1086,6 +1193,9 @@ export class LAppModel extends CubismUserModel {
     this._look = null;
     this._updateScheduler = new CubismUpdateScheduler();
     this._motionUpdated = false;
+    this._skipLoadParameters = 0;
+    this._paramOverrides = new Map();
+    this._pendingActionFinish = false;
   }
 
   private _updateScheduler: CubismUpdateScheduler; // アップデートスケジューラー
@@ -1119,4 +1229,7 @@ export class LAppModel extends CubismUserModel {
   _allMotionCount: number; // モーション総数
   _wavFileHandler: LAppWavFileHandler; //wavファイルハンドラ
   _consistency: boolean; // MOC3整合性チェック管理用
+  _skipLoadParameters: number; // stopAllMotions 后跳过 loadParameters 的帧数
+  _paramOverrides: Map<string, { value: number; expires: number }>; // 参数覆盖表
+  _pendingActionFinish: boolean; // 标记动画是否待结束
 }

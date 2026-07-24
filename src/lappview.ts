@@ -241,8 +241,8 @@ export class LAppView {
 
     const lapplive2dmanager = this._subdelegate.getLive2DManager();
 
-    // タッチ終了
-    lapplive2dmanager.onDrag(0.0, 0.0);
+    // 不再在 pointer up 时重置 onDrag(0,0)
+    // hover handler 会持续跟踪鼠标位置，鼠标离开画布时才会重置
 
     // シングルタップ
     const x: number = this.transformViewX(posX);
