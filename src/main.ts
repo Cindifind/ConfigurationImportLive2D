@@ -746,7 +746,7 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
    *   const params = Live2DModel.listParameters()
    *   // Console 输出表格，返回数组
    */
-  listParameters(): Array<{ index: number; id: string; min: number; max: number; default: number; current: number }> {
+  listParameters(silent = false): Array<{ index: number; id: string; min: number; max: number; default: number; current: number }> {
     const mgr = getLive2DManager();
     if (!mgr) return [];
     const model = (mgr as any)._models[0] as LAppModel;
@@ -768,7 +768,7 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
       };
     });
 
-    console.table(result);
+    if (!silent) console.table(result);
     return result;
   },
 
@@ -798,6 +798,19 @@ function buildFullModelPath(modelPath: string, modelName: string): string {
       console.table(tableRows);
     }
     return result;
+  },
+
+  /**
+   * 直接设置单个参数值（实时覆盖，用于控制面板滑块）
+   * @param paramId 参数 ID
+   * @param value   目标值
+   */
+  _setParamDirect(paramId: string, value: number): void {
+    const mgr = getLive2DManager();
+    if (!mgr) return;
+    const model = (mgr as any)._models[0] as LAppModel;
+    if (!model) return;
+    model.setParamOverride(paramId, value, Date.now() + 500);
   }
 };
 

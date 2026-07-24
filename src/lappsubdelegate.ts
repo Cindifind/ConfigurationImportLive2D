@@ -59,6 +59,8 @@ export class LAppSubdelegate {
     }
 
     this._canvas = canvas;
+    this._hoverX = 0;
+    this._hoverY = 0;
 
     if (LAppDefine.CanvasSize === 'auto') {
       this.resizeCanvas();
@@ -296,29 +298,30 @@ export class LAppSubdelegate {
   /**
    * 鼠标悬停（无需按下），头部跟随鼠标，覆盖整个页面。
    * 使用 getBoundingClientRect 精确定位画布中心。
+   * 带平滑插值，防止头部移动过快。
    */
   public onPointHover(clientX: number, clientY: number): void {
     if (!this._view) return;
 
-    // getBoundingClientRect 给出 canvas 在视口中的精确位置
     const rect = this._canvas.getBoundingClientRect();
     const canvasCenterX = rect.left + rect.width * 0.5;
     const canvasCenterY = rect.top + rect.height * 0.5;
 
-    // 以 canvas 尺寸一半为基准归一化
     const halfW = rect.width * 0.5;
     const halfH = rect.height * 0.5;
 
-    let viewX = (clientX - canvasCenterX) / halfW;
-    let viewY = (canvasCenterY - clientY) / halfH;
+    // 目标值（原始跟随，幅度缩小为 0.6）
+    const targetX = Math.max(-1.0, Math.min(1.0, (clientX - canvasCenterX) / halfW * 0.6));
+    const targetY = Math.max(-1.0, Math.min(1.0, (canvasCenterY - clientY) / halfH * 0.6));
 
-    // 限制最大范围，防止过度旋转
-    viewX = Math.max(-1.5, Math.min(1.5, viewX));
-    viewY = Math.max(-1.5, Math.min(1.5, viewY));
+    // 平滑插值（值越小越慢）
+    const smooth = 0.08; // 每帧向目标靠近 8%
+    this._hoverX += (targetX - this._hoverX) * smooth;
+    this._hoverY += (targetY - this._hoverY) * smooth;
 
     const lapplive2dmanager = this.getLive2DManager();
     if (lapplive2dmanager) {
-      lapplive2dmanager.onDrag(viewX, viewY);
+      lapplive2dmanager.onDrag(this._hoverX, this._hoverY);
     }
   }
 
@@ -361,6 +364,8 @@ export class LAppSubdelegate {
   }
 
   private _canvas: HTMLCanvasElement;
+  private _hoverX: number;
+  private _hoverY: number;
 
   /**
    * View情報
