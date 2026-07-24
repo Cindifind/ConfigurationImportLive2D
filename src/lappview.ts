@@ -103,10 +103,16 @@ export class LAppView {
     this._touchManager = null;
     this._deviceToScreen = null;
 
-    this._back.release();
-    this._back = null;
+    if (this._back) {
+      this._back.release();
+      this._back = null;
+    }
 
-    this._subdelegate.getGlManager().getGl().deleteProgram(this._programId);
+    const glManager = this._subdelegate?.getGlManager();
+    const gl = glManager?.getGl();
+    if (gl && this._programId) {
+      gl.deleteProgram(this._programId);
+    }
     this._programId = null;
   }
 

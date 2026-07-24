@@ -37,9 +37,8 @@ export class LAppDelegate {
    */
   public static releaseInstance(): void {
     if (s_instance != null) {
-      s_instance.release();
+      try { s_instance.release(); } catch (e) { /* 页面卸载时忽略释放错误 */ }
     }
-
     s_instance = null;
   }
 
@@ -139,28 +138,24 @@ export class LAppDelegate {
    * イベントリスナーを解除する。
    */
   private releaseEventListener(): void {
-    document.removeEventListener('pointerup', this.pointBeganEventListener);
-    this.pointBeganEventListener = null;
-    document.removeEventListener('pointermove', this.pointMovedEventListener);
-    this.pointMovedEventListener = null;
-    document.removeEventListener('pointermove', this.pointHoverEventListener);
-    this.pointHoverEventListener = null;
-    document.removeEventListener('pointerdown', this.pointEndedEventListener);
-    this.pointEndedEventListener = null;
-    document.removeEventListener('pointerdown', this.pointCancelEventListener);
-    this.pointCancelEventListener = null;
+    if (this.pointBeganEventListener) { document.removeEventListener('pointerdown', this.pointBeganEventListener); this.pointBeganEventListener = null; }
+    if (this.pointMovedEventListener) { document.removeEventListener('pointermove', this.pointMovedEventListener); this.pointMovedEventListener = null; }
+    if (this.pointHoverEventListener) { document.removeEventListener('pointermove', this.pointHoverEventListener); this.pointHoverEventListener = null; }
+    if (this.pointEndedEventListener) { document.removeEventListener('pointerup', this.pointEndedEventListener); this.pointEndedEventListener = null; }
+    if (this.pointCancelEventListener) { document.removeEventListener('pointercancel', this.pointCancelEventListener); this.pointCancelEventListener = null; }
   }
 
   /**
    * Subdelegate を解放する
    */
   private releaseSubdelegates(): void {
-    for (let i = 0; i < this._subdelegates.length; i++) {
-      this._subdelegates[i].release();
+    if (this._subdelegates) {
+      for (let i = 0; i < this._subdelegates.length; i++) {
+        if (this._subdelegates[i]) this._subdelegates[i].release();
+      }
+      this._subdelegates.length = 0;
+      this._subdelegates = null;
     }
-
-    this._subdelegates.length = 0;
-    this._subdelegates = null;
   }
 
   /**
