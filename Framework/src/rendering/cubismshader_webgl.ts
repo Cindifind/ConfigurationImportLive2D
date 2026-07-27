@@ -1076,10 +1076,14 @@ export class CubismShader_WebGL {
    * @param vertShaderSrc 頂点シェーダのソース
    * @param fragShaderSrc フラグメントシェーダのソース
    */
-  public generateShaders(): void {
-    if (this._isShaderLoading) {
-      return;
+  public generateShaders(): Promise<void> {
+    if (this._isShaderLoading && this._shadersLoadPromise) {
+      return this._shadersLoadPromise;
     }
+    if (this._isShaderLoaded) {
+      return Promise.resolve();
+    }
+
     this._isShaderLoading = true;
     this._isShaderLoaded = false;
     this._shaderSets.length = this._shaderCount;
@@ -1088,7 +1092,7 @@ export class CubismShader_WebGL {
     }
 
     // シェーダーのソースの読み込み
-    this.loadShaders()
+    this._shadersLoadPromise = this.loadShaders()
       .then(() => {
         // NOTE: ファイルの読み込みを待つ必要があるためこのようにする
         this.registerShader(); // 通常シェーダーの登録
@@ -1098,8 +1102,10 @@ export class CubismShader_WebGL {
       })
       .catch(error => {
         this._isShaderLoading = false;
-        console.error('Failed to load shaders:', error);
+        throw error; // 向上传播错误，不再吞掉
       });
+
+    return this._shadersLoadPromise;
   }
 
   /**
@@ -1917,6 +1923,7 @@ export class CubismShader_WebGL {
   _isShaderLoaded: boolean; // シェーダーの読み込みが完了したかどうか
   _defaultShaderPath: string; // デフォルトのシェーダーパス
   _shaderPath: string; // シェーダーパス
+  _shadersLoadPromise: Promise<void>; // 着色器加载 Promise（链式调用用）
 }
 
 /**

@@ -522,7 +522,22 @@ export class LAppModel extends CubismUserModel {
         );
         this.setupTextures();
         this.getRenderer().startUp(this._subdelegate.getGlManager().getGl());
-        this.getRenderer().loadShaders(LAppDefine.getEffectiveShaderPath());
+        // loadShaders 现在返回 Promise，链式等待
+        this.getRenderer()
+          .loadShaders(LAppDefine.getEffectiveShaderPath())
+          .then(() => {
+            if (this._shadersReadyResolve) {
+              this._shadersReadyResolve();
+              this._shadersReadyResolve = null;
+            }
+          })
+          .catch((err: any) => {
+            console.error('[LAppModel] 着色器加载失败:', err);
+            if (this._shadersReadyReject) {
+              this._shadersReadyReject(err);
+              this._shadersReadyReject = null;
+            }
+          });
       }
     };
   }
@@ -556,13 +571,22 @@ export class LAppModel extends CubismUserModel {
 
         // ロード完了時に呼び出すコールバック関数
         const onLoad = (textureInfo: TextureInfo): void => {
-          this.getRenderer().bindTexture(modelTextureNumber, textureInfo.id);
+          if (textureInfo && textureInfo.id) {
+            this.getRenderer().bindTexture(modelTextureNumber, textureInfo.id);
+          } else {
+            console.warn(`[LAppModel] 纹理 #${modelTextureNumber} (${texturePath}) 加载失败，跳过绑定`);
+          }
 
           this._textureCount++;
 
           if (this._textureCount >= textureCount) {
             // ロード完了
             this._state = LoadStep.CompleteSetup;
+            // 解决 whenSetupComplete() promise，通知外部模型已就绪
+            if (this._setupCompleteResolve) {
+              this._setupCompleteResolve();
+              this._setupCompleteResolve = null;
+            }
           }
         };
 
@@ -1046,7 +1070,21 @@ export class LAppModel extends CubismUserModel {
             this.getRenderer().startUp(
               this._subdelegate.getGlManager().getGl()
             );
-            this.getRenderer().loadShaders(LAppDefine.getEffectiveShaderPath());
+            this.getRenderer()
+              .loadShaders(LAppDefine.getEffectiveShaderPath())
+              .then(() => {
+                if (this._shadersReadyResolve) {
+                  this._shadersReadyResolve();
+                  this._shadersReadyResolve = null;
+                }
+              })
+              .catch((err: any) => {
+                console.error('[LAppModel] 着色器加载失败:', err);
+                if (this._shadersReadyReject) {
+                  this._shadersReadyReject(err);
+                  this._shadersReadyReject = null;
+                }
+              });
           }
         });
     }
@@ -1196,6 +1234,34 @@ export class LAppModel extends CubismUserModel {
     this._skipLoadParameters = 0;
     this._paramOverrides = new Map();
     this._pendingActionFinish = false;
+
+    // 完成 Promise（当 state === CompleteSetup 时 resolve）
+    this._setupCompleteResolve = null;
+    this._setupCompletePromise = new Promise<void>(resolve => {
+      this._setupCompleteResolve = resolve;
+    });
+    this._shadersReadyResolve = null;
+    this._shadersReadyReject = null;
+    this._shadersReadyPromise = new Promise<void>((resolve, reject) => {
+      this._shadersReadyResolve = resolve;
+      this._shadersReadyReject = reject;
+    });
+  }
+
+  /**
+   * 等待模型加载完成（state === CompleteSetup）
+   * 完全链式，无轮询
+   */
+  public whenSetupComplete(): Promise<void> {
+    return this._setupCompletePromise;
+  }
+
+  /**
+   * 等待着色器加载完成
+   * 完全链式，无轮询。加载失败直接抛出异常。
+   */
+  public whenShadersReady(): Promise<void> {
+    return this._shadersReadyPromise;
   }
 
   private _updateScheduler: CubismUpdateScheduler; // アップデートスケジューラー
@@ -1232,4 +1298,9 @@ export class LAppModel extends CubismUserModel {
   _skipLoadParameters: number; // stopAllMotions 后跳过 loadParameters 的帧数
   _paramOverrides: Map<string, { value: number; expires: number }>; // 参数覆盖表
   _pendingActionFinish: boolean; // 标记动画是否待结束
+  private _setupCompletePromise: Promise<void>;
+  private _setupCompleteResolve: (() => void) | null;
+  private _shadersReadyPromise: Promise<void>;
+  private _shadersReadyResolve: (() => void) | null;
+  private _shadersReadyReject: ((err: any) => void) | null;
 }

@@ -8,10 +8,9 @@
 import { LAppDelegate } from './lappdelegate';
 import * as LAppDefine from './lappdefine';
 import { DynamicModelLoader } from './dynamic_model_loader';
-import { CubismShaderManager_WebGL } from '@framework/rendering/cubismshader_webgl';
 import { LAppLive2DManager } from './lapplive2dmanager';
 import { LAppSubdelegate } from './lappsubdelegate';
-import { LAppModel, LoadStep } from './lappmodel';
+import { LAppModel } from './lappmodel';
 import { LAppView } from './lappview';
 import { getTalkManager, TalkStartCallback, TalkEndCallback, TalkActionCallback, ModelBehaviorInfo } from './live2dtalkmanager';
 import { CubismFramework } from '@framework/live2dcubismframework';
@@ -28,64 +27,10 @@ interface Window {
 }
 
 /**
- * 等待着色器异步加载完成后再启动渲染循环
- * 解决 "[CSM][W]Shader program is not initialized" 警告
- */
-function waitForShadersThenRun(maxWaitMs = 8000): void {
-  const app = LAppDelegate.getInstance() as any;
-  const subdelegates: any[] = app._subdelegates;
-  
-  if (!subdelegates || subdelegates.length === 0) {
-    console.warn('[Live2D] 无 subdelegate，直接启动渲染循环');
-    LAppDelegate.getInstance().run();
-    return;
-  }
-
-  const gl = subdelegates[0].getGl();
-  if (!gl) {
-    console.warn('[Live2D] GL context 不可用，直接启动渲染循环');
-    LAppDelegate.getInstance().run();
-    return;
-  }
-
-  console.log('[Live2D] 开始等待着色器加载...');
-  
-  const startTime = Date.now();
-  let pollCount = 0;
-  const checkShader = (): void => {
-    pollCount++;
-    try {
-      const shader = CubismShaderManager_WebGL.getInstance().getShader(gl);
-      if (shader && (shader as any)._isShaderLoaded) {
-        console.log(`[Live2D] 着色器已加载 (轮询${pollCount}次, ${Date.now() - startTime}ms)，启动渲染循环`);
-        LAppDelegate.getInstance().run();
-        return;
-      }
-      if (pollCount === 1 || pollCount % 20 === 0) {
-        console.log(`[Live2D] 着色器尚未就绪，继续等待... (轮询${pollCount}次, ${Date.now() - startTime}ms)`);
-      }
-    } catch (_) {
-      // GL context 可能还未就绪
-    }
-
-    if (Date.now() - startTime > maxWaitMs) {
-      console.warn(`[Live2D] 着色器加载超时 (${maxWaitMs}ms)，强制启动渲染循环`);
-      LAppDelegate.getInstance().run();
-      return;
-    }
-
-    setTimeout(checkShader, 50);
-  };
-
-  // 先等 100ms 让模型加载触发着色器加载
-  setTimeout(checkShader, 100);
-}
-
-/**
  * アプリケーションの初期化処理
  * 页面加载完成 或 动态import后 都会调用
  */
-function initApp(): void {
+async function initApp(): Promise<void> {
   console.log('[Live2D] initApp() 开始初始化...');
   
   // 从HTML元素获取配置
@@ -158,33 +103,47 @@ function initApp(): void {
   };
   
   console.log(`[Live2D] 开始初始化 WebGL 和应用程序...`);
-  
+
   // Initialize WebGL and create the application instance
   if (!LAppDelegate.getInstance().initialize(targetContainer)) {
     console.error('[Live2D] LAppDelegate.initialize() 失败!');
     return;
   }
-  
   console.log('[Live2D] LAppDelegate.initialize() 完成');
-  
-  // 从HTML配置加载模型
-  DynamicModelLoader.loadModelFromHtmlConfig();
-  
-  // 等待着色器加载完成后再启动渲染循环
-  waitForShadersThenRun();
+
+  // 串行等待：模型加载 → 着色器加载 → 设置 ready → 启动渲染
+  try {
+    console.log('[Live2D] 等待模型加载...');
+    const model = await DynamicModelLoader.loadModelFromHtmlConfig();
+
+    if (model) {
+      console.log('[Live2D] 模型就绪，等待着色器...');
+      await model.whenShadersReady();
+      console.log('[Live2D] 着色器就绪');
+    }
+
+    // 设置 ready 并触发所有排队的 onReady 回调
+    _ready = true;
+    const cbs = _onReadyCallbacks.splice(0);
+    for (const cb of cbs) { try { cb(); } catch (e) { console.error(e); } }
+    console.log(`[Live2D] 初始化完成 (${cbs.length} 个回调已执行)`);
+
+    // 启动渲染循环
+    LAppDelegate.getInstance().run();
+  } catch (e) {
+    console.error('[Live2D] 初始化失败:', e);
+    // 降级：强制启动渲染循环
+    LAppDelegate.getInstance().run();
+  }
 }
 
 /**
  * ブラウザロード後の処理
- * 兼容两种场景：
- *   1. 页面正常加载（监听 load 事件）
- *   2. 外部动态 import（页面已加载完成，直接执行）
  */
 if (document.readyState === 'complete') {
-  // 页面已加载完成（动态import场景），直接初始化
   initApp();
 } else {
-  window.addEventListener('load', initApp, { passive: true });
+  window.addEventListener('load', () => { initApp(); }, { passive: true });
 }
 
 /**
@@ -206,49 +165,7 @@ function guard(): boolean {
   return true;
 }
 
-/** 启动内部就绪检查器 */
-function _startReadyChecker(): void {
-  let pollCount = 0;
-  const check = (): void => {
-    pollCount++;
-    const mgr = DynamicModelLoader.getLive2DManager();
-    
-    if (!mgr) {
-      if (pollCount <= 3 || pollCount % 20 === 0) {
-        console.log(`[Live2D] onReady checker: manager 未就绪 (轮询${pollCount}次)`);
-      }
-      setTimeout(check, 100);
-      return;
-    }
-    
-    const models = (mgr as any)._models;
-    if (!models || models.length === 0) {
-      if (pollCount <= 3 || pollCount % 20 === 0) {
-        console.log(`[Live2D] onReady checker: _models 为空 (轮询${pollCount}次)`);
-      }
-      setTimeout(check, 100);
-      return;
-    }
-    
-    const model = models[0] as LAppModel;
-    const state = (model as any)._state;
-    if (pollCount <= 3 || pollCount % 10 === 0) {
-      console.log(`[Live2D] onReady checker: model._state=${state} (轮询${pollCount}次)`);
-    }
-    
-    if (model && state === LoadStep.CompleteSetup) {
-      console.log(`[Live2D] onReady checker: 模型就绪! state=${state}, 待执行回调=${_onReadyCallbacks.length}`);
-      _ready = true;
-      const cbs = _onReadyCallbacks.splice(0);
-      for (const cb of cbs) { try { cb(); } catch (e) { console.error(e); } }
-      return;
-    }
-    setTimeout(check, 100);
-  };
-  setTimeout(check, 200);
-}
-
-_startReadyChecker();
+// _startReadyChecker 已移除 — initApp() 串行链直接设置 _ready
 
 // ===== 对外暴露的 API (window.Live2DModel) =====
 function getLive2DManager(): LAppLive2DManager | null {

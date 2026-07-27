@@ -67,76 +67,58 @@ export class LAppTextureManager {
     // データのオンロードをトリガーにする
     const img = new Image();
     img.crossOrigin = 'anonymous';
+
+    img.addEventListener(
+      'error',
+      (): void => {
+        console.error(`[LAppTextureManager] 纹理加载失败: ${fileName}`);
+        // 加载失败仍然调用回调（传 null），避免阻塞链式加载
+        callback(null);
+      },
+      { passive: true }
+    );
+
     img.addEventListener(
       'load',
       (): void => {
+        const gl = this._glManager.getGl();
+
         // テクスチャオブジェクトの作成
-        const tex: WebGLTexture = this._glManager.getGl().createTexture();
+        const tex: WebGLTexture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
-        // テクスチャを選択
-        this._glManager
-          .getGl()
-          .bindTexture(this._glManager.getGl().TEXTURE_2D, tex);
-
-        // テクスチャにピクセルを書き込む
-        this._glManager
-          .getGl()
-          .texParameteri(
-            this._glManager.getGl().TEXTURE_2D,
-            this._glManager.getGl().TEXTURE_MIN_FILTER,
-            this._glManager.getGl().LINEAR_MIPMAP_LINEAR
-          );
-        this._glManager
-          .getGl()
-          .texParameteri(
-            this._glManager.getGl().TEXTURE_2D,
-            this._glManager.getGl().TEXTURE_MAG_FILTER,
-            this._glManager.getGl().LINEAR
-          );
-
-        // Premult処理を行わせる
         if (usePremultiply) {
-          this._glManager
-            .getGl()
-            .pixelStorei(
-              this._glManager.getGl().UNPACK_PREMULTIPLY_ALPHA_WEBGL,
-              1
-            );
+          gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, 1);
         }
 
-        // テクスチャにピクセルを書き込む
-        this._glManager
-          .getGl()
-          .texImage2D(
-            this._glManager.getGl().TEXTURE_2D,
-            0,
-            this._glManager.getGl().RGBA,
-            this._glManager.getGl().RGBA,
-            this._glManager.getGl().UNSIGNED_BYTE,
-            img
-          );
+        // 写入像素数据
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
 
-        // ミップマップを生成
-        this._glManager
-          .getGl()
-          .generateMipmap(this._glManager.getGl().TEXTURE_2D);
+        // 检查 WebGL 错误（跨域 tainted 图片会在这里报错）
+        const err = gl.getError();
+        if (err !== gl.NO_ERROR) {
+          console.error(`[LAppTextureManager] texImage2D 失败 (${fileName}), glError=${err}`);
+          gl.deleteTexture(tex);
+          gl.bindTexture(gl.TEXTURE_2D, null);
+          // 仍然调用回调（传 null），避免阻塞
+          callback(null);
+          return;
+        }
 
-        // テクスチャをバインド
-        this._glManager
-          .getGl()
-          .bindTexture(this._glManager.getGl().TEXTURE_2D, null);
+        gl.generateMipmap(gl.TEXTURE_2D);
+        gl.bindTexture(gl.TEXTURE_2D, null);
 
         const textureInfo: TextureInfo = new TextureInfo();
-        if (textureInfo != null) {
-          textureInfo.fileName = fileName;
-          textureInfo.width = img.width;
-          textureInfo.height = img.height;
-          textureInfo.id = tex;
-          textureInfo.img = img;
-          textureInfo.usePremultply = usePremultiply;
-          if (this._textures != null) {
-            this._textures.push(textureInfo);
-          }
+        textureInfo.fileName = fileName;
+        textureInfo.width = img.width;
+        textureInfo.height = img.height;
+        textureInfo.id = tex;
+        textureInfo.img = img;
+        textureInfo.usePremultply = usePremultiply;
+        if (this._textures != null) {
+          this._textures.push(textureInfo);
         }
 
         callback(textureInfo);
