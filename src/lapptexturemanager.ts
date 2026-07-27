@@ -23,10 +23,18 @@ export class LAppTextureManager {
    * 解放する。
    */
   public release(): void {
-    for (let i = 0; i < this._textures.length; i++) {
-      this._glManager.getGl().deleteTexture(this._textures[i].id);
+    if (this._glManager) {
+      const gl = this._glManager.getGl();
+      if (gl) {
+        for (let i = 0; i < this._textures.length; i++) {
+          if (this._textures[i]?.id) {
+            gl.deleteTexture(this._textures[i].id);
+          }
+        }
+      }
     }
     this._textures = null;
+    this._glManager = null;
   }
 
   /**

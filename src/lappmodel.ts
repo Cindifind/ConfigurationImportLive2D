@@ -725,54 +725,24 @@ export class LAppModel extends CubismUserModel {
 
     // ex) idle_0
     const name = `${group}_${no}`;
-    let motion: CubismMotion = this._motions.get(name) as CubismMotion;
-    let autoDelete = false;
+    const motion: CubismMotion = this._motions.get(name) as CubismMotion;
 
     if (motion == null) {
-      fetch(`${this._modelHomeDir}${motionFileName}`)
-        .then(response => {
-          if (response.ok) {
-            return response.arrayBuffer();
-          } else if (response.status >= 400) {
-            CubismLogError(
-              `Failed to load file ${this._modelHomeDir}${motionFileName}`
-            );
-            return new ArrayBuffer(0);
-          }
-        })
-        .then(arrayBuffer => {
-          motion = this.loadMotion(
-            arrayBuffer,
-            arrayBuffer.byteLength,
-            null,
-            onFinishedMotionHandler,
-            onBeganMotionHandler,
-            this._modelSetting,
-            group,
-            no,
-            this._motionConsistency
-          );
-        });
-
-      if (motion) {
-        motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
-        autoDelete = true; // 終了時にメモリから削除
-      } else {
-        CubismLogError("Can't start motion {0} .", motionFileName);
-        // ロードできなかったモーションのReservePriorityをリセットする
-        this._motionManager.setReservePriority(LAppDefine.PriorityNone);
-        return InvalidMotionQueueEntryHandleValue;
-      }
-    } else {
-      motion.setBeganMotionHandler(onBeganMotionHandler);
-      motion.setFinishedMotionHandler(onFinishedMotionHandler);
+      // Motion 未被预加载，异步加载后通过回调播放
+      this._loadAndPlayMotion(
+        motionFileName, name, group, no, priority,
+        onFinishedMotionHandler, onBeganMotionHandler
+      );
+      return InvalidMotionQueueEntryHandleValue;
     }
+
+    motion.setBeganMotionHandler(onBeganMotionHandler);
+    motion.setFinishedMotionHandler(onFinishedMotionHandler);
 
     //voice
     const voice = this._modelSetting.getMotionSoundFileName(group, no);
     if (voice.localeCompare('') != 0) {
-      let path = voice;
-      path = this._modelHomeDir + path;
+      const path = this._modelHomeDir + voice;
       this._wavFileHandler.start(path);
     }
 
@@ -781,9 +751,43 @@ export class LAppModel extends CubismUserModel {
     }
     return this._motionManager.startMotionPriority(
       motion,
-      autoDelete,
+      false,
       priority
     );
+  }
+
+  /**
+   * 异步加载未预加载的 motion 并播放
+   */
+  private _loadAndPlayMotion(
+    motionFileName: string, name: string,
+    group: string, no: number, priority: number,
+    onFinishedMotionHandler?: FinishedMotionCallback,
+    onBeganMotionHandler?: BeganMotionCallback
+  ): void {
+    fetch(`${this._modelHomeDir}${motionFileName}`)
+      .then(response => {
+        if (response.ok) return response.arrayBuffer();
+        CubismLogError(`Failed to load file ${this._modelHomeDir}${motionFileName}`);
+        return new ArrayBuffer(0);
+      })
+      .then(arrayBuffer => {
+        const motion = this.loadMotion(
+          arrayBuffer, arrayBuffer.byteLength, name,
+          onFinishedMotionHandler, onBeganMotionHandler,
+          this._modelSetting, group, no, this._motionConsistency
+        );
+        if (motion) {
+          motion.setEffectIds(this._eyeBlinkIds, this._lipSyncIds);
+          this._motions.set(name, motion);
+          this._motionManager.startMotionPriority(motion, true, priority);
+        } else {
+          this._motionManager.setReservePriority(LAppDefine.PriorityNone);
+        }
+      })
+      .catch(() => {
+        this._motionManager.setReservePriority(LAppDefine.PriorityNone);
+      });
   }
 
   /**

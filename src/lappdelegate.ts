@@ -258,6 +258,16 @@ export class LAppDelegate {
   }
 
   /**
+   * 获取第一个 Subdelegate（便捷访问）
+   */
+  public getFirstSubdelegate(): LAppSubdelegate | null {
+    if (this._subdelegates && this._subdelegates.length > 0) {
+      return this._subdelegates[0];
+    }
+    return null;
+  }
+
+  /**
    * Privateなコンストラクタ
    */
   private constructor() {

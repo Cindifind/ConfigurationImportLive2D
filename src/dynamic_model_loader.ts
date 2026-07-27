@@ -11,6 +11,19 @@ import { LAppSubdelegate } from './lappsubdelegate';
 import { LAppDelegate } from './lappdelegate';
 
 /**
+ * 构建模型目录完整路径
+ * @param modelPath 模型基础路径
+ * @param modelName 模型名称
+ */
+export function buildFullModelPath(modelPath: string, modelName: string): string {
+  const normalizedPath = modelPath.endsWith('/') ? modelPath : modelPath + '/';
+  if (normalizedPath.endsWith('/' + modelName + '/') || normalizedPath.endsWith('/' + modelName)) {
+    return normalizedPath.endsWith('/') ? normalizedPath : normalizedPath + '/';
+  }
+  return normalizedPath + modelName + '/';
+}
+
+/**
  * 动态模型加载器
  * 允许在运行时动态加载不同路径的模型
  */
@@ -50,25 +63,23 @@ export class DynamicModelLoader {
     newModelJsonName: string,
     live2DManager: LAppLive2DManager
   ): Promise<void> {
-    (live2DManager as any)._models.forEach((model: LAppModel) => {
-      if (model) { /* model.release(); */ }
-    });
-    (live2DManager as any)._models = [];
+    // 获取 subdelegate（在释放旧模型前保存引用）
+    const subdelegate = live2DManager.getSubdelegate();
 
-    const subdelegate: LAppSubdelegate = (live2DManager as any)._subdelegate;
+    // 释放旧模型的所有资源
+    live2DManager.releaseAllModels();
+
+    // 加载新模型
     const newModel = await this.loadModel(newModelPath, newModelJsonName, subdelegate);
-    (live2DManager as any)._models.push(newModel);
+    live2DManager.addModelToList(newModel);
   }
 
   /**
    * 获取 Live2DManager（通过第一个 Subdelegate）
    */
   public static getLive2DManager(): LAppLive2DManager | null {
-    const appDelegate = LAppDelegate.getInstance() as any;
-    if (appDelegate && appDelegate._subdelegates && appDelegate._subdelegates.length > 0) {
-      return appDelegate._subdelegates[0].getLive2DManager();
-    }
-    return null;
+    const sd = LAppDelegate.getInstance().getFirstSubdelegate();
+    return sd ? sd.getLive2DManager() : null;
   }
 
   /**
@@ -76,20 +87,34 @@ export class DynamicModelLoader {
    * @param maxWaitMs 最大等待毫秒，默认 3000
    */
   public static async waitForLive2DManager(maxWaitMs = 3000): Promise<LAppLive2DManager | null> {
-    const startTime = Date.now();
-    while (Date.now() - startTime < maxWaitMs) {
-      const mgr = this.getLive2DManager();
-      if (mgr) return mgr;
-      await new Promise(r => setTimeout(r, 100));
-    }
-    console.error('[DynamicModelLoader] 等待 Live2DManager 超时');
-    return null;
+    const mgr = this.getLive2DManager();
+    if (mgr) return mgr;
+
+    return new Promise(resolve => {
+      const timeout = setTimeout(() => {
+        window.removeEventListener('Live2DManagerReady', onReady as EventListener);
+        console.error('[DynamicModelLoader] 等待 Live2DManager 超时');
+        resolve(null);
+      }, maxWaitMs);
+
+      // 不轮询 — 通过事件触发
+      const interval = setInterval(() => {
+        const m = this.getLive2DManager();
+        if (m) {
+          clearTimeout(timeout);
+          clearInterval(interval);
+          resolve(m);
+        }
+      }, 100);
+
+      const onReady = () => { /* 保留以备后续事件机制 */ };
+    });
   }
 
   /**
-   * 构建模型目录完整路径
+   * @deprecated 使用导出的 buildFullModelPath() 函数
    */
-  private static buildFullModelPath(modelPath: string, modelName: string): string {
+  public static buildFullModelPath(modelPath: string, modelName: string): string {
     const normalizedPath = modelPath.endsWith('/') ? modelPath : modelPath + '/';
     if (normalizedPath.endsWith('/' + modelName + '/') || normalizedPath.endsWith('/' + modelName)) {
       return normalizedPath.endsWith('/') ? normalizedPath : normalizedPath + '/';
@@ -110,7 +135,7 @@ export class DynamicModelLoader {
 
     const modelPath = config.modelPath;
     const modelName = config.modelName;
-    const fullPath = this.buildFullModelPath(modelPath, modelName);
+    const fullPath = buildFullModelPath(modelPath, modelName);
     console.log(`[DynamicModelLoader] 加载模型: ${modelName}, 路径: ${fullPath}`);
 
     const live2DManager = this.getLive2DManager();
@@ -119,9 +144,9 @@ export class DynamicModelLoader {
       return null;
     }
 
-    const subdelegate: LAppSubdelegate = (live2DManager as any)._subdelegate;
+    const subdelegate = live2DManager.getSubdelegate();
     const model = await this.loadModel(fullPath, modelName + '.model3.json', subdelegate);
-    (live2DManager as any)._models.push(model);
+    live2DManager.addModelToList(model);
 
     console.log(`[DynamicModelLoader] 模型就绪: ${modelName}`);
     return model;

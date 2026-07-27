@@ -45,7 +45,6 @@ export class Live2DTalkManager {
   private _autoTalkMaxInterval = 20000;
   private _autoTalkTimer: ReturnType<typeof setTimeout> | null = null;
   private _autoTalkEnabled = false;
-  private _pollTimer: ReturnType<typeof setTimeout> | null = null;
   private _currentText = '';
   private _talkAction: TalkActionCallback | null = null;
   private _talkMotionGroup = '';
@@ -58,7 +57,7 @@ export class Live2DTalkManager {
     const model = this.getCurrentModel();
     if (!model) return null;
 
-    const setting = (model as any)._modelSetting;
+    const setting = model._modelSetting;
     if (!setting) return null;
 
     const motionGroups: string[] = [];
@@ -136,10 +135,8 @@ export class Live2DTalkManager {
    */
   private getCurrentModel(): LAppModel | null {
     const manager = DynamicModelLoader.getLive2DManager();
-    if (!manager || !(manager as any)._models || (manager as any)._models.length === 0) {
-      return null;
-    }
-    return (manager as any)._models[0] as LAppModel;
+    if (!manager) return null;
+    return manager.getFirstModel();
   }
 
   /**
@@ -165,15 +162,15 @@ export class Live2DTalkManager {
     }
 
     // 3. 自动检测：有表情就用表情
-    if ((model as any)._expressions && (model as any)._expressions.size > 0) {
+    if (model._expressions && model._expressions.size > 0) {
       try {
-        (model as any).setRandomExpression();
+        model.setRandomExpression();
       } catch (_) { /* ignore */ }
       return;
     }
 
     // 4. 自动检测：查找非 Idle 类的 motion 组
-    const setting = (model as any)._modelSetting;
+    const setting = model._modelSetting;
     if (setting) {
       const mgCount = setting.getMotionGroupCount?.() || 0;
       for (let i = 0; i < mgCount; i++) {
@@ -182,14 +179,14 @@ export class Live2DTalkManager {
         const lower = name.toLowerCase();
         if (lower === 'idle' || lower === 'tapbody' || lower === 'tap') continue;
         try {
-          (model as any).startRandomMotion(name, 3);
+          model.startRandomMotion(name, 3);
           return;
         } catch (_) { /* try next */ }
       }
       // 如果只有 Idle，就用 Idle
       if (mgCount > 0) {
         try {
-          (model as any).startRandomMotion(setting.getMotionGroupName(0), 3);
+          model.startRandomMotion(setting.getMotionGroupName(0), 3);
         } catch (_) { /* ignore */ }
       }
     }
@@ -211,10 +208,27 @@ export class Live2DTalkManager {
 
     // 有音频文件 → 对口型
     if (audioUrl) {
-      const wavHandler = (model as any)._wavFileHandler;
+      const wavHandler = model._wavFileHandler;
       if (wavHandler) {
-        wavHandler.start(audioUrl);
-        this._pollForDuration(wavHandler);
+        // start() 返回加载完成的 Promise
+        wavHandler.start(audioUrl).then(() => {
+          const duration = wavHandler.getDuration();
+          const sec = duration > 0 ? duration : 3;
+          for (const cb of this._onTalkStartCallbacks) {
+            try { cb(this._currentText, sec); } catch (e) { console.error(e); }
+          }
+          // 等待播放完成
+          return wavHandler.whenFinished();
+        }).then(() => {
+          for (const cb of this._onTalkEndCallbacks) {
+            try { cb(); } catch (e) { console.error(e); }
+          }
+        }).catch(() => {
+          // 加载失败也触发结束回调
+          for (const cb of this._onTalkEndCallbacks) {
+            try { cb(); } catch (e) { console.error(e); }
+          }
+        });
         return;
       }
     }
@@ -241,58 +255,9 @@ export class Live2DTalkManager {
   }
 
   /**
-   * 轮询等待 WAV 加载完成，获取时长后触发 onTalkStart
-   */
-  private _pollForDuration(wavHandler: any): void {
-    let attempts = 0;
-    const maxAttempts = 50;
-
-    const check = () => {
-      attempts++;
-      const duration = wavHandler.getDuration ? wavHandler.getDuration() : 0;
-
-      if (duration > 0 || attempts >= maxAttempts) {
-        const sec = duration > 0 ? duration : 3;
-        for (const cb of this._onTalkStartCallbacks) {
-          try { cb(this._currentText, sec); } catch (e) { console.error(e); }
-        }
-        this._pollForCompletion(wavHandler);
-      } else {
-        setTimeout(check, 100);
-      }
-    };
-
-    setTimeout(check, 50);
-  }
-
-  /**
-   * 轮询检测音频播放完成
-   */
-  private _pollForCompletion(wavHandler: any): void {
-    if (this._pollTimer) clearTimeout(this._pollTimer);
-
-    const check = () => {
-      if (!wavHandler.isPlaying || !wavHandler.isPlaying()) {
-        for (const cb of this._onTalkEndCallbacks) {
-          try { cb(); } catch (e) { console.error(e); }
-        }
-        this._pollTimer = null;
-        return;
-      }
-      this._pollTimer = setTimeout(check, 150);
-    };
-
-    this._pollTimer = setTimeout(check, 150);
-  }
-
-  /**
    * 停止当前说话
    */
   public stopTalk(): void {
-    if (this._pollTimer) {
-      clearTimeout(this._pollTimer);
-      this._pollTimer = null;
-    }
     for (const cb of this._onTalkEndCallbacks) {
       try { cb(); } catch (e) { console.error(e); }
     }

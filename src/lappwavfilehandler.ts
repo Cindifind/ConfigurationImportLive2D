@@ -18,6 +18,12 @@ export class LAppWavFileHandler extends IParameterProvider {
       this._sampleOffset >= this._wavFileInfo._samplesPerChannel
     ) {
       this._lastRms = 0.0;
+      // 触发完成回调
+      if (this._onFinished) {
+        const cb = this._onFinished;
+        this._onFinished = null;
+        cb();
+      }
       return false;
     }
 
@@ -58,7 +64,7 @@ export class LAppWavFileHandler extends IParameterProvider {
     return true;
   }
 
-  public start(filePath: string): void {
+  public start(filePath: string): Promise<boolean> {
     // サンプル位参照位置を初期化
     this._sampleOffset = 0;
     this._userTimeSeconds = 0.0;
@@ -66,7 +72,23 @@ export class LAppWavFileHandler extends IParameterProvider {
     // RMS値をリセット
     this._lastRms = 0.0;
 
-    this.loadWavFile(filePath);
+    // 重置完成回调
+    this._onFinished = null;
+
+    return this.loadWavFile(filePath);
+  }
+
+  /**
+   * 返回 Promise，在音频播放完成时 resolve
+   */
+  public whenFinished(): Promise<void> {
+    return new Promise(resolve => {
+      if (!this.isPlaying()) {
+        resolve();
+        return;
+      }
+      this._onFinished = resolve;
+    });
   }
 
   /**
@@ -311,6 +333,7 @@ export class LAppWavFileHandler extends IParameterProvider {
     this._sampleOffset = 0.0;
     this._wavFileInfo = new WavFileInfo();
     this._byteReader = new ByteReader();
+    this._onFinished = null;
   }
 
   _pcmData: Array<Float32Array>;
@@ -319,6 +342,7 @@ export class LAppWavFileHandler extends IParameterProvider {
   _sampleOffset: number;
   _wavFileInfo: WavFileInfo;
   _byteReader: ByteReader;
+  private _onFinished: (() => void) | null;
   loadFiletoBytes = (arrayBuffer: ArrayBuffer, length: number): void => {
     this._byteReader._fileByte = arrayBuffer;
     this._byteReader._fileDataView = new DataView(this._byteReader._fileByte);

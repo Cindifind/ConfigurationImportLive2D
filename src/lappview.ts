@@ -302,8 +302,6 @@ export class LAppView {
   _viewMatrix: CubismViewMatrix; // viewMatrix
   _programId: WebGLProgram; // シェーダID
   _back: LAppSprite; // 背景画像
-  _changeModel: boolean; // モデル切り替えフラグ
-  _isClick: boolean; // クリック中
   private _subdelegate: LAppSubdelegate;
 
   // 用户缩放（等比例，仅缩小，最大1.0）

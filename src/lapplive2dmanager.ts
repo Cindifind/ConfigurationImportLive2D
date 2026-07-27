@@ -22,8 +22,20 @@ export class LAppLive2DManager {
   /**
    * 現在のシーンで保持しているすべてのモデルを解放する
    */
-  private releaseAllModel(): void {
+  public releaseAllModels(): void {
+    for (const model of this._models) {
+      if (model) {
+        try { model.release(); } catch (e) { console.error('[LAppLive2DManager] 模型释放失败:', e); }
+      }
+    }
     this._models.length = 0;
+  }
+
+  /**
+   * @deprecated 使用 releaseAllModels() 替代
+   */
+  private releaseAllModel(): void {
+    this.releaseAllModels();
   }
 
   public setOffscreenSize(width: number, height: number): void {
@@ -64,7 +76,7 @@ export class LAppLive2DManager {
 
     // 1. 检查自定义触控区域回调
     if (model && this._hitAreaCallbacks.size > 0) {
-      const setting = (model as any)._modelSetting;
+      const setting = model._modelSetting;
       if (setting) {
         const hitCount = setting.getHitAreasCount?.() || 0;
         for (let i = 0; i < hitCount; i++) {
@@ -220,11 +232,24 @@ export class LAppLive2DManager {
   }
 
   /**
-   * モデルの追加
+   * 将模型添加到列表（供 DynamicModelLoader 使用）
    */
-  public addModel(sceneIndex: number = 0): void {
-    this._sceneIndex = sceneIndex;
-    this.changeScene(this._sceneIndex);
+  public addModelToList(model: LAppModel): void {
+    this._models.push(model);
+  }
+
+  /**
+   * 获取当前模型列表
+   */
+  public getModels(): LAppModel[] {
+    return this._models;
+  }
+
+  /**
+   * 获取第一个模型（便捷访问）
+   */
+  public getFirstModel(): LAppModel | null {
+    return this._models.length > 0 ? this._models[0] : null;
   }
 
   /**
@@ -240,7 +265,13 @@ export class LAppLive2DManager {
   /**
    * 解放する。
    */
-  public release(): void {}
+  public release(): void {
+    this.releaseAllModels();
+    this._hitAreaCallbacks.clear();
+    this._onAnyTapCallbacks.length = 0;
+    this._viewMatrix = null;
+    this._subdelegate = null;
+  }
 
   /**
    * 初期化する。
@@ -260,6 +291,13 @@ export class LAppLive2DManager {
    * 自身が所属するSubdelegate
    */
   private _subdelegate: LAppSubdelegate;
+
+  /**
+   * 获取所属的 Subdelegate
+   */
+  public getSubdelegate(): LAppSubdelegate {
+    return this._subdelegate;
+  }
 
   _viewMatrix: CubismMatrix44; // モデル描画に用いるview行列
   _models: Array<LAppModel>; // モデルインスタンスのコンテナ
