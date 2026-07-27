@@ -567,7 +567,7 @@ export class LAppModel extends CubismUserModel {
         // WebGLのテクスチャユニットにテクスチャをロードする
         let texturePath =
           this._modelSetting.getTextureFileName(modelTextureNumber);
-        texturePath = this._modelHomeDir + texturePath;
+        texturePath = (this._textureHomeDir || this._modelHomeDir) + texturePath;
 
         // ロード完了時に呼び出すコールバック関数
         const onLoad = (textureInfo: TextureInfo): void => {
@@ -1172,6 +1172,15 @@ export class LAppModel extends CubismUserModel {
   }
 
   /**
+   * 设置独立的贴图目录（不设置则默认使用模型目录）
+   * @param path 贴图目录路径，传 undefined 恢复默认
+   */
+  public setTextureHomeDir(path: string | undefined): void {
+    if (path && !path.endsWith('/')) path += '/';
+    this._textureHomeDir = path;
+  }
+
+  /**
    * デストラクタに相当する処理のオーバーライド
    */
   public release(): void {
@@ -1238,6 +1247,7 @@ export class LAppModel extends CubismUserModel {
     this._skipLoadParameters = 0;
     this._paramOverrides = new Map();
     this._pendingActionFinish = false;
+    this._textureHomeDir = undefined;
 
     // 完成 Promise（当 state === CompleteSetup 时 resolve）
     this._setupCompleteResolve = null;
@@ -1302,6 +1312,7 @@ export class LAppModel extends CubismUserModel {
   _skipLoadParameters: number; // stopAllMotions 后跳过 loadParameters 的帧数
   _paramOverrides: Map<string, { value: number; expires: number }>; // 参数覆盖表
   _pendingActionFinish: boolean; // 标记动画是否待结束
+  private _textureHomeDir: string | undefined; // 独立贴图目录（undefined = 使用模型目录）
   private _setupCompletePromise: Promise<void>;
   private _setupCompleteResolve: (() => void) | null;
   private _shadersReadyPromise: Promise<void>;

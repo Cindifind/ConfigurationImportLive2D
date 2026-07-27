@@ -281,7 +281,7 @@ export class LAppLive2DManager {
     this._subdelegate = subdelegate;
     // 如果已通过 HTML data-* 属性配置了模型，跳过默认模型加载（避免404）
     const config = (typeof window !== 'undefined') ? (window as any).Live2DConfig : null;
-    if (config?.modelPath && config?.modelName) {
+    if (config?.modelName) {
       return;
     }
     this.changeScene(this._sceneIndex);

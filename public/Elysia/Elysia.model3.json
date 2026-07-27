@@ -1,0 +1,25 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "Elysia.moc3",
+		"Textures": [
+			"5493134230020097",
+			"5493304350990336",
+			"5493305089187840"
+		],
+		"Physics": "Elysia.physics3.json",
+		"DisplayInfo": "Elysia.cdi3.json"
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		}
+	]
+}
