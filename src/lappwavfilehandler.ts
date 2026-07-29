@@ -481,9 +481,7 @@ export class ByteReader {
    * @return Csm::csmUint16 読み取った16ビット値
    */
   public get16LittleEndian(): number {
-    const ret =
-      (this._fileDataView.getUint8(this._readOffset + 1) << 8) |
-      this._fileDataView.getUint8(this._readOffset);
+    const ret = this._fileDataView.getUint16(this._readOffset, true);
     this._readOffset += 2;
     return ret;
   }
@@ -506,11 +504,7 @@ export class ByteReader {
    * @return Csm::csmUint32 読み取った32ビット値
    */
   public get32LittleEndian(): number {
-    const ret =
-      (this._fileDataView.getUint8(this._readOffset + 3) << 24) |
-      (this._fileDataView.getUint8(this._readOffset + 2) << 16) |
-      (this._fileDataView.getUint8(this._readOffset + 1) << 8) |
-      this._fileDataView.getUint8(this._readOffset);
+    const ret = this._fileDataView.getUint32(this._readOffset, true);
     this._readOffset += 4;
     return ret;
   }
