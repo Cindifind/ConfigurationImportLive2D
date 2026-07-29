@@ -5,6 +5,7 @@
  */
 
 import { LAppModel } from './lappmodel';
+import { LAppWavFileHandler } from './lappwavfilehandler';
 import { DynamicModelLoader } from './dynamic_model_loader';
 
 export type TalkStartCallback = (text: string, durationSec: number) => void;
@@ -234,23 +235,55 @@ export class Live2DTalkManager {
    * 启动 WAV 对口型流程
    */
   private _startWavTalk(model: LAppModel, startFn: () => Promise<boolean>): void {
-    startFn().then(() => {
+    console.log('[Live2DTalk] _startWavTalk: calling startFn...');
+    startFn().then((result) => {
+      console.log('[Live2DTalk] startFn resolved, result=', result);
       const wavHandler = model._wavFileHandler;
       const duration = wavHandler.getDuration();
       const sec = duration > 0 ? duration : 3;
+      console.log('[Live2DTalk] duration=', sec.toFixed(1), 's, callbacks=', this._onTalkStartCallbacks.length);
+
+      // fire onTalkStart
       for (const cb of this._onTalkStartCallbacks) {
         try { cb(this._currentText, sec); } catch (e) { console.error(e); }
       }
+
+      // 兜底：如果模型没有 lip sync 参数，手动驱动 update() 以保证 whenFinished 能 resolve
+      if (!model._lipSyncIds || model._lipSyncIds.length === 0) {
+        console.log('[Live2DTalk] no lip sync params, starting fallback update loop');
+        this._startFallbackUpdate(wavHandler);
+      }
+
       return wavHandler.whenFinished();
     }).then(() => {
+      console.log('[Live2DTalk] whenFinished resolved, firing onTalkEnd');
       for (const cb of this._onTalkEndCallbacks) {
         try { cb(); } catch (e) { console.error(e); }
       }
-    }).catch(() => {
+    }).catch((err) => {
+      console.error('[Live2DTalk] error in chain:', err);
       for (const cb of this._onTalkEndCallbacks) {
         try { cb(); } catch (e) { console.error(e); }
       }
     });
+  }
+
+  /**
+   * 手动驱动 wavHandler 的 update（用于没有 lip sync 的模型）
+   */
+  private _startFallbackUpdate(wavHandler: LAppWavFileHandler): void {
+    let lastTime = performance.now();
+    const tick = () => {
+      if (!wavHandler.isPlaying()) {
+        return; // 停止，update() 内部会触发 _onFinished
+      }
+      const now = performance.now();
+      const dt = (now - lastTime) / 1000;
+      lastTime = now;
+      wavHandler.update(Math.min(dt, 0.1)); // 限制最大 delta time
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
   }
 
   /**

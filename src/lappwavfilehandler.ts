@@ -139,16 +139,24 @@ export class LAppWavFileHandler extends IParameterProvider {
           this._byteReader._readOffset += fmtChunkSize - 16;
         }
         while (
-          !this._byteReader.getCheckSignature('data') &&
-          this._byteReader._readOffset < this._byteReader._fileSize
+          this._byteReader._readOffset + 4 <= this._byteReader._fileSize &&
+          !this._byteReader.getCheckSignature('data')
         ) {
-          this._byteReader._readOffset +=
-            this._byteReader.get32LittleEndian();
+          if (this._byteReader._readOffset + 4 > this._byteReader._fileSize) {
+            break;
+          }
+          const chunkSize = this._byteReader.get32LittleEndian();
+          this._byteReader._readOffset += chunkSize;
         }
         if (this._byteReader._readOffset >= this._byteReader._fileSize) {
           throw new Error('Cannot find "data" Chunk.');
         }
-        const dataChunkSize = this._byteReader.get32LittleEndian();
+        let dataChunkSize = this._byteReader.get32LittleEndian();
+        // 修正异常的 data chunk size：不超过文件中剩余字节数
+        const remainingBytes = this._byteReader._fileSize - this._byteReader._readOffset;
+        if (dataChunkSize > remainingBytes) {
+          dataChunkSize = remainingBytes;
+        }
         this._wavFileInfo._samplesPerChannel =
           (dataChunkSize * 8) /
           (this._wavFileInfo._bitsPerSample * this._wavFileInfo._numberOfChannels);
@@ -310,11 +318,14 @@ export class LAppWavFileHandler extends IParameterProvider {
           }
           // "data"チャンクが出現するまで読み飛ばし
           while (
-            !this._byteReader.getCheckSignature('data') &&
-            this._byteReader._readOffset < this._byteReader._fileSize
+            this._byteReader._readOffset + 4 <= this._byteReader._fileSize &&
+            !this._byteReader.getCheckSignature('data')
           ) {
-            this._byteReader._readOffset +=
-            this._byteReader.get32LittleEndian();
+            if (this._byteReader._readOffset + 4 > this._byteReader._fileSize) {
+              break;
+            }
+            const chunkSize2 = this._byteReader.get32LittleEndian();
+            this._byteReader._readOffset += chunkSize2;
           }
           // ファイル内に"data"チャンクが出現しなかった
           if (this._byteReader._readOffset >= this._byteReader._fileSize) {
@@ -323,7 +334,12 @@ export class LAppWavFileHandler extends IParameterProvider {
           }
           // サンプル数
           {
-            const dataChunkSize = this._byteReader.get32LittleEndian();
+            let dataChunkSize = this._byteReader.get32LittleEndian();
+            // 修正异常的 data chunk size：不超过文件中剩余字节数
+            const remainingBytes = this._byteReader._fileSize - this._byteReader._readOffset;
+            if (dataChunkSize > remainingBytes) {
+              dataChunkSize = remainingBytes;
+            }
             this._wavFileInfo._samplesPerChannel =
               (dataChunkSize * 8) /
               (this._wavFileInfo._bitsPerSample *
@@ -500,6 +516,11 @@ export class ByteReader {
    * @return Csm::csmUint8 読み取った8ビット値
    */
   public get8(): number {
+    if (this._readOffset >= this._fileSize) {
+      throw new Error(
+        `Read out of bounds: offset=${this._readOffset}, size=${this._fileSize}`
+      );
+    }
     const ret = this._fileDataView.getUint8(this._readOffset);
     this._readOffset++;
     return ret;
@@ -533,6 +554,11 @@ export class ByteReader {
    * @return Csm::csmUint32 読み取った32ビット値
    */
   public get32LittleEndian(): number {
+    if (this._readOffset + 4 > this._fileSize) {
+      throw new Error(
+        `Read out of bounds: offset=${this._readOffset}+4, size=${this._fileSize}`
+      );
+    }
     const ret = this._fileDataView.getUint32(this._readOffset, true);
     this._readOffset += 4;
     return ret;
