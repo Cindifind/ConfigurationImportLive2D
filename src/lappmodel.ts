@@ -674,6 +674,15 @@ export class LAppModel extends CubismUserModel {
       this._model.setParameterValueById(id, entry.value);
     }
 
+    // 调试：首次有覆盖时输出
+    if (anyActive && !this._overrideLogged) {
+      this._overrideLogged = true;
+      console.log('[LAppModel] _applyParamOverrides 生效, 覆盖数=', this._paramOverrides.size);
+    }
+    if (!anyActive && this._overrideLogged) {
+      this._overrideLogged = false;
+    }
+
     // 如果所有覆盖都已过期，标记动画结束
     if (!anyActive && this._paramOverrides.size === 0 && this._pendingActionFinish) {
       this._pendingActionFinish = false;
@@ -1312,6 +1321,7 @@ export class LAppModel extends CubismUserModel {
   _skipLoadParameters: number; // stopAllMotions 后跳过 loadParameters 的帧数
   _paramOverrides: Map<string, { value: number; expires: number }>; // 参数覆盖表
   _pendingActionFinish: boolean; // 标记动画是否待结束
+  private _overrideLogged: boolean; // 调试用
   private _textureHomeDir: string | undefined; // 独立贴图目录（undefined = 使用模型目录）
   private _setupCompletePromise: Promise<void>;
   private _setupCompleteResolve: (() => void) | null;

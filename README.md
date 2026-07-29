@@ -121,6 +121,8 @@ data-model-path    → 贴图图片（不设置则跟随模型目录）
 | | `listActions()` | 列出动作名 |
 | 参数查询 | `getParameter(id)` | 单参数详情 |
 | | `listParameters()` | 全部参数列表 |
+| 参数控制 | `setParameterValue(id, val, w?)` | 设置参数目标值（混合） |
+| | `addParameterDelta(id, delta, w?)` | 叠加参数偏移（混合） |
 
 ---
 
@@ -266,6 +268,53 @@ Live2DModel.getParameter('shy');
 
 Live2DModel.listParameters(); // Console.table 输出全部参数
 ```
+
+### 2.13 参数控制（复用官方 SDK motion 混合公式）
+
+两个参数控制方法均复用官方 SDK `CubismMotion.doUpdateParameters()` 的混合算法：
+
+```
+blended = sourceValue + (target - sourceValue) × weight
+```
+
+- `sourceValue`：当前帧系统值（loadParameters → motion → saveParameters → updaters 之后的干净值）
+- `weight=0`：保持当前值不变；`weight=1`：立即到达目标值
+- 写入时机在 `_applyParamOverrides()`（帧末最后一环），不被 `loadParameters()` 重置
+
+**`setParameterValue(paramId, value, weight=1)`** — 绝对目标值混合
+
+```js
+// 立即设为目标值
+Live2DModel.setParameterValue('ParamCheek', 0.8);
+
+// 平滑过渡（适合鼠标跟踪、惯性效果）
+Live2DModel.setParameterValue('ParamAngleX', lookX, 0.12);
+// 每帧: blended = current + (lookX - current) * 0.12 → 渐进跟随
+```
+
+**`addParameterDelta(paramId, delta, weight=1)`** — 增量偏移混合
+
+基线为参数默认值（`getParameterDefaultValue`），避免读到上帧 override 导致累积漂移。公式：`defaultValue + delta × weight`
+
+```js
+// 身体摆动（角度参数范围 [-30,30]，delta 需 1~3 才可见）
+Live2DModel.addParameterDelta('ParamBodyAngleX', 2.0 * Math.sin(t));
+
+// 平滑呼吸
+Live2DModel.addParameterDelta('ParamBreath', 0.2 * Math.sin(t * 1.4), 0.5);
+
+// 停止叠加（delta=0 即恢复默认值）
+Live2DModel.addParameterDelta('ParamBodyAngleX', 0);
+```
+
+**与 SDK motion 的对应关系：**
+
+| SDK motion 公式 | 对应 API |
+|---|---|
+| `source + (curveTarget - source) * fadeWeight` | `setParameterValue(id, val, weight)` |
+| EyeBlink: `value *= eyeBlinkValue` | `setParameterValue` 手动乘 |
+| LipSync: `value += lipSyncValue` | `addParameterDelta(id, delta, 1.0)` |
+| 帧管线 | `paramOverride` 在 updaters 之后、model.update 之前 |
 
 ---
 

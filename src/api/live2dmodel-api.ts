@@ -526,6 +526,79 @@ export const Live2DModelAPI = {
   },
 
   /**
+   * 在系统值之上叠加动画偏移（用于 JS 手绘动画）
+   *
+   * 复用官方 SDK motion 的混合公式：
+   *   blended = sourceValue + delta * weight
+   *   即 sourceValue + (target - sourceValue) * weight，其中 target = sourceValue + delta
+   *
+   * 读取当前系统值（loadParameters → motion → saveParameters → updaters 之后的干净值），
+   * 在此基础上叠加 delta，不会被下一帧 loadParameters() 重置。
+   *
+   * @param paramId 参数 ID
+   * @param delta   偏移量（叠加到系统当前值之上）
+   * @param weight  混合权重 0~1，默认 1（立即到位），< 1 时平滑过渡
+   *
+   * 用法：
+   *   // 身体摆动叠加（立即到位）
+   *   Live2DModel.addParameterDelta('ParamBodyAngleX', 0.04 * Math.sin(t));
+   *   // 平滑过渡
+   *   Live2DModel.addParameterDelta('ParamBodyAngleX', 0.04 * Math.sin(t), 0.3);
+   *   // 停止叠加（delta=0 即恢复系统原值）
+   *   Live2DModel.addParameterDelta('ParamBodyAngleX', 0);
+   */
+  addParameterDelta(paramId: string, delta: number, weight = 1.0): void {
+    const model = getCurrentModel();
+    if (!model) return;
+    const cubismModel = model.getModel();
+    if (!cubismModel) return;
+
+    const id = CubismFramework.getIdManager().getId(paramId);
+    const index = cubismModel.getParameterIndex(id);
+    if (index < 0) return;
+
+    // SDK 混合公式: baseline + (target - baseline) * weight
+    // 基线用 defaultValue 而非当前值，避免读到上帧 override 造成累积漂移
+    // (override 在 saveParameters 之后写入，loadParameters 不恢复它)
+    const defaultVal = cubismModel.getParameterDefaultValue(index);
+    model.setParamOverride(paramId, defaultVal + delta * weight, Date.now() + 1000);
+  },
+
+  /**
+   * 设置参数目标值（用于绝对控制，如头部跟踪、眨眼等）
+   *
+   * 复用官方 SDK motion 的混合公式：
+   *   blended = sourceValue + (targetValue - sourceValue) * weight
+   *
+   * 读取当前系统值，从当前值向目标做加权混合，避免跳跃式赋值。
+   * weight=1 时等价于直接覆盖；weight<1 时平滑过渡。
+   *
+   * @param paramId    参数 ID
+   * @param value      绝对目标值
+   * @param weight     混合权重 0~1，默认 1（立即到位），< 1 时平滑过渡
+   *
+   * 用法：
+   *   // 立即设置
+   *   Live2DModel.setParameterValue('ParamCheek', 0.8);
+   *   // 平滑过渡（适合鼠标跟踪）
+   *   Live2DModel.setParameterValue('ParamAngleX', lookX, 0.15);
+   */
+  setParameterValue(paramId: string, value: number, weight = 1.0): void {
+    const model = getCurrentModel();
+    if (!model) return;
+    const cubismModel = model.getModel();
+    if (!cubismModel) return;
+
+    const id = CubismFramework.getIdManager().getId(paramId);
+    const index = cubismModel.getParameterIndex(id);
+    if (index < 0) return;
+
+    // SDK 混合公式: sourceValue + (target - sourceValue) * weight
+    const sourceValue = cubismModel.getParameterValueByIndex(index);
+    model.setParamOverride(paramId, sourceValue + (value - sourceValue) * weight, Date.now() + 1000);
+  },
+
+  /**
    * 列出模型所有参数的 ID、取值范围、默认值、当前值
    * 返回数组并在 console 打印表格
    *
