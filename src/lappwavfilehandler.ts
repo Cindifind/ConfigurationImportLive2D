@@ -152,6 +152,20 @@ export class LAppWavFileHandler extends IParameterProvider {
           (dataChunkSize * 8) /
           (this._wavFileInfo._bitsPerSample * this._wavFileInfo._numberOfChannels);
 
+        // 校验参数合法性
+        if (
+          this._wavFileInfo._samplesPerChannel <= 0 ||
+          this._wavFileInfo._samplesPerChannel > 50_000_000 ||
+          !Number.isFinite(this._wavFileInfo._samplesPerChannel) ||
+          this._wavFileInfo._numberOfChannels <= 0 ||
+          this._wavFileInfo._numberOfChannels > 8 ||
+          this._wavFileInfo._bitsPerSample <= 0
+        ) {
+          throw new Error(
+            `Invalid WAV: samples=${this._wavFileInfo._samplesPerChannel}, channels=${this._wavFileInfo._numberOfChannels}, bits=${this._wavFileInfo._bitsPerSample}`
+          );
+        }
+
         this._pcmData = new Array(this._wavFileInfo._numberOfChannels);
         for (let channelCount = 0; channelCount < this._wavFileInfo._numberOfChannels; channelCount++) {
           this._pcmData[channelCount] = new Float32Array(this._wavFileInfo._samplesPerChannel);
@@ -313,6 +327,20 @@ export class LAppWavFileHandler extends IParameterProvider {
               (dataChunkSize * 8) /
               (this._wavFileInfo._bitsPerSample *
                 this._wavFileInfo._numberOfChannels);
+          }
+          // 校验参数合法性
+          if (
+            this._wavFileInfo._samplesPerChannel <= 0 ||
+            this._wavFileInfo._samplesPerChannel > 50_000_000 ||
+            !Number.isFinite(this._wavFileInfo._samplesPerChannel) ||
+            this._wavFileInfo._numberOfChannels <= 0 ||
+            this._wavFileInfo._numberOfChannels > 8 ||
+            this._wavFileInfo._bitsPerSample <= 0
+          ) {
+            ret = false;
+            throw new Error(
+              `Invalid WAV: samples=${this._wavFileInfo._samplesPerChannel}, channels=${this._wavFileInfo._numberOfChannels}, bits=${this._wavFileInfo._bitsPerSample}`
+            );
           }
           // 領域確保
           this._pcmData = new Array(this._wavFileInfo._numberOfChannels);
