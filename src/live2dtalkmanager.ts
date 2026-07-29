@@ -206,35 +206,51 @@ export class Live2DTalkManager {
 
     this._currentText = text || '';
 
-    // 有音频文件 → 对口型
     if (audioUrl) {
-      const wavHandler = model._wavFileHandler;
-      if (wavHandler) {
-        // start() 返回加载完成的 Promise
-        wavHandler.start(audioUrl).then(() => {
-          const duration = wavHandler.getDuration();
-          const sec = duration > 0 ? duration : 3;
-          for (const cb of this._onTalkStartCallbacks) {
-            try { cb(this._currentText, sec); } catch (e) { console.error(e); }
-          }
-          // 等待播放完成
-          return wavHandler.whenFinished();
-        }).then(() => {
-          for (const cb of this._onTalkEndCallbacks) {
-            try { cb(); } catch (e) { console.error(e); }
-          }
-        }).catch(() => {
-          // 加载失败也触发结束回调
-          for (const cb of this._onTalkEndCallbacks) {
-            try { cb(); } catch (e) { console.error(e); }
-          }
-        });
-        return;
-      }
+      this._startWavTalk(model, () => model._wavFileHandler.start(audioUrl));
+      return;
     }
 
-    // 无音频文件 → 用表情/motion 模拟说话
     this._doSilentTalk(model, text || '', 2);
+  }
+
+  /**
+   * 从 ArrayBuffer 加载 WAV 并驱动口型（无需 fetch）
+   * @param arrayBuffer WAV 文件的原始字节数据
+   * @param text        说话文本（气泡中显示）
+   */
+  public startTalkFromBytes(arrayBuffer: ArrayBuffer, text?: string): void {
+    const model = this.getCurrentModel();
+    if (!model) {
+      console.warn('[Live2DTalk] 模型未就绪');
+      return;
+    }
+
+    this._currentText = text || '';
+    this._startWavTalk(model, () => model._wavFileHandler.startFromBytes(arrayBuffer));
+  }
+
+  /**
+   * 启动 WAV 对口型流程
+   */
+  private _startWavTalk(model: LAppModel, startFn: () => Promise<boolean>): void {
+    startFn().then(() => {
+      const wavHandler = model._wavFileHandler;
+      const duration = wavHandler.getDuration();
+      const sec = duration > 0 ? duration : 3;
+      for (const cb of this._onTalkStartCallbacks) {
+        try { cb(this._currentText, sec); } catch (e) { console.error(e); }
+      }
+      return wavHandler.whenFinished();
+    }).then(() => {
+      for (const cb of this._onTalkEndCallbacks) {
+        try { cb(); } catch (e) { console.error(e); }
+      }
+    }).catch(() => {
+      for (const cb of this._onTalkEndCallbacks) {
+        try { cb(); } catch (e) { console.error(e); }
+      }
+    });
   }
 
   /**

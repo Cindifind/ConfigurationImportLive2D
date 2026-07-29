@@ -171,6 +171,21 @@ export const Live2DModelAPI = {
     getTalkManager().startTalk(audioUrl, text);
   },
 
+  /**
+   * 从 ArrayBuffer 加载 WAV 并驱动口型（无需 fetch）
+   * @param arrayBuffer WAV 文件的原始字节数据
+   * @param text        说话文本（显示在气泡中）
+   *
+   * 用法：
+   *   const res = await fetch('audio.wav');
+   *   const buf = await res.arrayBuffer();
+   *   Live2DModel.startTalkFromBytes(buf, '你好！');
+   */
+  startTalkFromBytes(arrayBuffer: ArrayBuffer, text?: string): void {
+    if (!guard()) return;
+    getTalkManager().startTalkFromBytes(arrayBuffer, text);
+  },
+
   stopTalk(): void {
     if (!guard()) return;
     getTalkManager().stopTalk();

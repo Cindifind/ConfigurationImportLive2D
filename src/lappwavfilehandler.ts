@@ -79,6 +79,98 @@ export class LAppWavFileHandler extends IParameterProvider {
   }
 
   /**
+   * 从 ArrayBuffer（字节数据）直接加载 WAV，无需 fetch
+   * @param arrayBuffer WAV 文件的原始字节数据
+   * @returns Promise<boolean> 加载是否成功
+   */
+  public startFromBytes(arrayBuffer: ArrayBuffer): Promise<boolean> {
+    this._sampleOffset = 0;
+    this._userTimeSeconds = 0.0;
+    this._lastRms = 0.0;
+    this._onFinished = null;
+
+    if (this._pcmData != null) {
+      this.releasePcmData();
+    }
+
+    return this.parseWavBytes(arrayBuffer);
+  }
+
+  /**
+   * 解析 WAV 字节数据（不 fetch）
+   */
+  private parseWavBytes(arrayBuffer: ArrayBuffer): Promise<boolean> {
+    return new Promise(resolveValue => {
+      let ret = false;
+
+      this._byteReader._fileByte = arrayBuffer;
+      this._byteReader._fileDataView = new DataView(arrayBuffer);
+      this._byteReader._fileSize = arrayBuffer.byteLength;
+      this._byteReader._readOffset = 0;
+
+      if (arrayBuffer.byteLength < 4) {
+        resolveValue(false);
+        return;
+      }
+
+      this._wavFileInfo._fileName = '(bytes)';
+
+      try {
+        if (!this._byteReader.getCheckSignature('RIFF')) {
+          throw new Error('Cannot find Signeture "RIFF".');
+        }
+        this._byteReader.get32LittleEndian();
+        if (!this._byteReader.getCheckSignature('WAVE')) {
+          throw new Error('Cannot find Signeture "WAVE".');
+        }
+        if (!this._byteReader.getCheckSignature('fmt ')) {
+          throw new Error('Cannot find Signeture "fmt".');
+        }
+        const fmtChunkSize = this._byteReader.get32LittleEndian();
+        if (this._byteReader.get16LittleEndian() != 1) {
+          throw new Error('File is not linear PCM.');
+        }
+        this._wavFileInfo._numberOfChannels = this._byteReader.get16LittleEndian();
+        this._wavFileInfo._samplingRate = this._byteReader.get32LittleEndian();
+        this._byteReader.get32LittleEndian();
+        this._byteReader.get16LittleEndian();
+        this._wavFileInfo._bitsPerSample = this._byteReader.get16LittleEndian();
+        if (fmtChunkSize > 16) {
+          this._byteReader._readOffset += fmtChunkSize - 16;
+        }
+        while (
+          !this._byteReader.getCheckSignature('data') &&
+          this._byteReader._readOffset < this._byteReader._fileSize
+        ) {
+          this._byteReader._readOffset += this._byteReader.get32LittleEndian() + 4;
+        }
+        if (this._byteReader._readOffset >= this._byteReader._fileSize) {
+          throw new Error('Cannot find "data" Chunk.');
+        }
+        const dataChunkSize = this._byteReader.get32LittleEndian();
+        this._wavFileInfo._samplesPerChannel =
+          (dataChunkSize * 8) /
+          (this._wavFileInfo._bitsPerSample * this._wavFileInfo._numberOfChannels);
+
+        this._pcmData = new Array(this._wavFileInfo._numberOfChannels);
+        for (let channelCount = 0; channelCount < this._wavFileInfo._numberOfChannels; channelCount++) {
+          this._pcmData[channelCount] = new Float32Array(this._wavFileInfo._samplesPerChannel);
+        }
+        for (let sampleCount = 0; sampleCount < this._wavFileInfo._samplesPerChannel; sampleCount++) {
+          for (let channelCount = 0; channelCount < this._wavFileInfo._numberOfChannels; channelCount++) {
+            this._pcmData[channelCount][sampleCount] = this.getPcmSample();
+          }
+        }
+        ret = true;
+        resolveValue(ret);
+      } catch (e) {
+        console.log(e);
+        resolveValue(false);
+      }
+    });
+  }
+
+  /**
    * 返回 Promise，在音频播放完成时 resolve
    */
   public whenFinished(): Promise<void> {
