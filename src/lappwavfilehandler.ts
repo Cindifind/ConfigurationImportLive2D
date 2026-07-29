@@ -142,7 +142,8 @@ export class LAppWavFileHandler extends IParameterProvider {
           !this._byteReader.getCheckSignature('data') &&
           this._byteReader._readOffset < this._byteReader._fileSize
         ) {
-          this._byteReader._readOffset += this._byteReader.get32LittleEndian() + 4;
+          this._byteReader._readOffset +=
+            this._byteReader.get32LittleEndian();
         }
         if (this._byteReader._readOffset >= this._byteReader._fileSize) {
           throw new Error('Cannot find "data" Chunk.');
@@ -313,7 +314,7 @@ export class LAppWavFileHandler extends IParameterProvider {
             this._byteReader._readOffset < this._byteReader._fileSize
           ) {
             this._byteReader._readOffset +=
-              this._byteReader.get32LittleEndian() + 4;
+            this._byteReader.get32LittleEndian();
           }
           // ファイル内に"data"チャンクが出現しなかった
           if (this._byteReader._readOffset >= this._byteReader._fileSize) {
