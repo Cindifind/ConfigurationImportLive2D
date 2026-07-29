@@ -23,6 +23,15 @@ import { LAppDelegate } from './lappdelegate';
 export function resolveModelPath(modelName: string): { dir: string; name: string } {
   // 规范化：反斜杠 → 正斜杠，去除 ./ 前缀
   const normalized = modelName.replace(/\\/g, '/').replace(/^\.\/?/, '');
+
+  // 绝对 URL（http/https/协议相对）：保持完整，只提取最后一段作为名称
+  if (/^https?:\/\/|^\/\//.test(normalized)) {
+    const segments = normalized.split('/').filter(Boolean);
+    const name = segments.pop() || 'Haru';
+    const dir = normalized.endsWith('/') ? normalized : normalized + '/';
+    return { dir, name };
+  }
+
   const segments = normalized.split('/').filter(Boolean);
   const name = segments.pop() || normalized || 'Haru';
   // 重建目录路径（确保以 / 结尾）
