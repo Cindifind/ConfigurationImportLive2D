@@ -110,11 +110,10 @@ data-model-path    → 贴图图片（不设置则跟随模型目录）
 | Motion | `loadMotion(name, url)` | 加载外部 motion |
 | | `playMotion(name, pri?)` | 播放注册的 motion |
 | | `stopAllMotions()` | 停止所有 motion |
-| 参数动画 | `setAction(name, kfs)` | 注册关键帧动画 |
-| | `playAction(name)` | 播放参数动画 |
+| 参数动画 | `playAction(name, kfs, cb?)` | 播放关键帧动画（自带锁） |
 | | `removeAction(name)` | 移除动画 |
 | | `listAnimNames()` | 列出动画名 |
-| | `listAnimActions()` | 列出动画详情 |
+| | `isPlaying(name)` | 查询是否播放中 |
 | 通用动作 | `registerAction(name, fn)` | 注册命名动作 |
 | | `triggerAction(name, ...args)` | 触发动作 |
 | | `unregisterAction(name)` | 移除动作 |
@@ -241,13 +240,22 @@ Live2DModel.stopAllMotions();
 
 ### 2.10 参数动画（关键帧）
 
+同名动画同时只允许播放一次，播放中重复调用静默跳过，播放完毕自动解锁。
+
 ```js
-Live2DModel.setAction('脸红', [
-  { paramId: 'shy', value: 1, delay: 300  },
-  { paramId: 'shy', value: 0, delay: 1000 },
+Live2DModel.playAction('捂胸', [
+  { paramId: 'Param19', value: 1, delay: 0    },
+  { paramId: 'Param19', value: 0, delay: 1500 },
 ]);
-Live2DModel.playAction('脸红');
-Live2DModel.listAnimNames(); // → ['脸红']
+
+Live2DModel.playAction('捂胸', [
+  { paramId: 'Param19', value: 1, delay: 0    },
+  { paramId: 'Param19', value: 0, delay: 1500 },
+], () => console.log('捂胸完毕'));
+
+Live2DModel.isPlaying('捂胸');  // → true/false
+Live2DModel.removeAction('捂胸');
+Live2DModel.listAnimNames();    // → ['捂胸']
 ```
 
 ### 2.11 通用动作注册表

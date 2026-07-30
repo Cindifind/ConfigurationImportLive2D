@@ -53,6 +53,10 @@ const _actionRegistry = new Map<string, (...args: any[]) => void>();
 // ===== 参数动画注册表 =====
 const _animActions = new Map<string, Array<{ paramId: string; value: number; delay?: number }>>();
 
+// ===== 动画/motion 播放锁 =====
+// 同一个名称正在播放时，重复调用静默跳过；播放完毕自动解锁
+const _playingSet = new Set<string>();
+
 // ===== 对外暴露的 API =====
 export const Live2DModelAPI = {
   /**
@@ -291,30 +295,61 @@ export const Live2DModelAPI = {
 
   /**
    * 播放已注册的 motion
+   *
+   * 同名 motion 播放中时重复调用静默跳过（不同名互不影响）。
+   * 播放完毕自动解锁并触发 onFinished 回调。
+   *
    * @param name     加载时注册的名称
    * @param priority 优先级，默认 3（强制）
+   * @param onFinished 播放完毕回调
    *
    * 用法：
    *   Live2DModel.playMotion('shy');
+   *   Live2DModel.playMotion('shy', 3, () => console.log('done'));
+   *   Live2DModel.isPlaying('shy'); // → true/false
    */
-  playMotion(name: string, priority = 3): void {
+  playMotion(name: string, priority = 3, onFinished?: () => void): void {
+    // 锁：同名正在播放则静默跳过
+    if (_playingSet.has(name)) return;
+
     if (!guard()) return;
     const model = getCurrentModel();
-    if (model) {
-      model.playMotionById(name, priority);
+    if (!model) return;
+
+    // 通过 motion 的 finish 回调解锁
+    const motion = (model as any)._motions?.get(name);
+    if (motion && typeof motion.setFinishedMotionHandler === 'function') {
+      motion.setFinishedMotionHandler(() => {
+        _playingSet.delete(name);
+        if (onFinished) onFinished();
+      });
     }
+
+    _playingSet.add(name);
+    model.playMotionById(name, priority);
   },
 
   /**
-   * 停止当前模型的所有 motion
+   * 停止当前模型的所有 motion，并清除所有动画锁
    */
   stopAllMotions(): void {
+    _playingSet.clear();
+
     if (!guard()) { console.warn('[Live2DModel] stopAllMotions: 模型未就绪'); return; }
     const model = getCurrentModel();
     if (!model) { console.warn('[Live2DModel] stopAllMotions: model 为空'); return; }
     console.log('[Live2DModel] stopAllMotions: 调用 model.stopAllMotions()');
     model.stopAllMotions();
     model.clearParamOverrides();
+  },
+
+  /**
+   * 查询动画/motion 是否正在播放
+   * @param name 动画或 motion 的名称
+   * @returns true 表示正在播放中
+   */
+  isPlaying(name: string): boolean {
+    return _playingSet.has(name);
   },
 
   // ===== 缩放控制 =====
@@ -425,47 +460,54 @@ export const Live2DModelAPI = {
   // ===== 参数动画系统 =====
 
   /**
-   * 注册一个参数动画（关键帧序列）
-   * @param name 动画名称
-   * @param keyframes 关键帧数组
+   * 播放参数动画（关键帧序列）— 合并注册与播放
    *
-   * 每个关键帧：
-   *   paramId - 参数 ID（来自模型 .model3.json 的 Parameters 段）
+   * 同名动画同时只允许播放一次；播放中重复调用静默跳过。
+   * 播放完毕自动解锁并触发 onFinished。
+   *
+   * @param name      动画名称（用作锁标识）
+   * @param keyframes 关键帧数组，每个关键帧：
+   *   paramId - 参数 ID
    *   value   - 目标值（通常 0~1）
-   *   delay   - 距上一个关键帧的延迟（毫秒），默认 0
+   *   delay   - 距上一帧的延迟（毫秒），默认 0
+   * @param onFinished 播放完毕回调
    *
    * 用法：
-   *   Live2DModel.setAction('捂胸', [
-   *     { paramId: 'Param19', value: 1, delay: 0    },  // 立即设为 1
-   *     { paramId: 'Param19', value: 0, delay: 1500 },  // 1.5 秒后归 0
+   *   Live2DModel.playAction('捂胸', [
+   *     { paramId: 'Param19', value: 1, delay: 0    },
+   *     { paramId: 'Param19', value: 0, delay: 1500 },
    *   ]);
    *
-   *   Live2DModel.playAction('捂胸');
+   *   Live2DModel.playAction('捂胸', [...], () => console.log('done'));
+   *   Live2DModel.isPlaying('捂胸'); // → true/false
    */
-  setAction(name: string, keyframes: Array<{ paramId: string; value: number; delay?: number }>): void {
-    _animActions.set(name, keyframes);
-  },
+  playAction(
+    name: string,
+    keyframes: Array<{ paramId: string; value: number; delay?: number }>,
+    onFinished?: () => void
+  ): void {
+    // 锁：同名正在播放则静默跳过
+    if (_playingSet.has(name)) return;
 
-  playAction(name: string): void {
     if (!guard()) { console.warn(`[Live2DModel] playAction "${name}" 跳过（模型未就绪）`); return; }
-    const kfs = _animActions.get(name);
-    if (!kfs) { console.warn(`[Live2DModel] 未注册的动画: "${name}"`); return; }
     const model = getCurrentModel();
     if (!model) { console.warn(`[Live2DModel] playAction: model 为空`); return; }
 
+    // 存储关键帧以便重复播放
+    _animActions.set(name, keyframes);
+    _playingSet.add(name);
+
     // 计算每个关键帧的绝对开始时间和持续时间
-    // 持续时间 = 到同参数下一个关键帧的间隔（最后一个用 delay 或 500ms）
     const schedule: Array<{ paramId: string; value: number; startMs: number; holdMs: number }> = [];
     let elapsed = 0;
-    for (let i = 0; i < kfs.length; i++) {
-      const kf = kfs[i];
+    for (let i = 0; i < keyframes.length; i++) {
+      const kf = keyframes[i];
       elapsed += kf.delay || 0;
-      // 找同参数的下一个关键帧来计算 hold 时间
-      let holdMs = 500; // 默认保持 500ms
-      for (let j = i + 1; j < kfs.length; j++) {
-        if (kfs[j].paramId === kf.paramId) {
+      let holdMs = 500;
+      for (let j = i + 1; j < keyframes.length; j++) {
+        if (keyframes[j].paramId === kf.paramId) {
           let nextStart = 0;
-          for (let k = 0; k <= j; k++) nextStart += kfs[k].delay || 0;
+          for (let k = 0; k <= j; k++) nextStart += keyframes[k].delay || 0;
           holdMs = nextStart - elapsed;
           break;
         }
@@ -473,23 +515,24 @@ export const Live2DModelAPI = {
       schedule.push({ paramId: kf.paramId, value: kf.value, startMs: elapsed, holdMs });
     }
 
-    // 用 setTimeout 触发每个关键帧，但通过 setParamOverride 让值在每帧持续生效
     for (const s of schedule) {
       setTimeout(() => {
         model.setParamOverride(s.paramId, s.value, Date.now() + s.holdMs);
-        console.log(`[Live2DModel] ${s.paramId} = ${s.value} (hold ${s.holdMs}ms)`);
       }, s.startMs);
     }
 
-    // 标记动画结束
+    // 全部关键帧执行完毕后解锁
     const totalDuration = elapsed + 500;
     setTimeout(() => {
       model._pendingActionFinish = true;
+      _playingSet.delete(name);
+      if (onFinished) onFinished();
     }, totalDuration);
   },
 
   removeAction(name: string): void {
     _animActions.delete(name);
+    _playingSet.delete(name);
   },
 
   listAnimNames(): string[] {
