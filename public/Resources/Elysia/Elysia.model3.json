@@ -3,9 +3,9 @@
 	"FileReferences": {
 		"Moc": "Elysia.moc3",
 		"Textures": [
-			"5493134230020097",
-			"5493304350990336",
-			"5493305089187840"
+			"texture_00_metool.png",
+			"texture_01_metool.png",
+			"texture_02_metool.png"
 		],
 		"Physics": "Elysia.physics3.json",
 		"DisplayInfo": "Elysia.cdi3.json"
